@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
 #[command(name = "greeter", version, about = "Minimal agent-friendly CLI")]
@@ -11,15 +11,34 @@ pub struct Cli {
     pub command: Commands,
 }
 
+/// Greeting style. Use ValueEnum so clap rejects invalid values with a clear
+/// error instead of silently accepting arbitrary strings.
+#[derive(Clone, Copy, ValueEnum, serde::Serialize)]
+pub enum Style {
+    Friendly,
+    Formal,
+    Pirate,
+}
+
+impl std::fmt::Display for Style {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Friendly => write!(f, "friendly"),
+            Self::Formal => write!(f, "formal"),
+            Self::Pirate => write!(f, "pirate"),
+        }
+    }
+}
+
 #[derive(Subcommand)]
 pub enum Commands {
     /// Greet someone (the actual domain command)
     Hello {
         /// Name to greet
         name: String,
-        /// Greeting style: friendly, formal, pirate
-        #[arg(long, default_value = "friendly")]
-        style: String,
+        /// Greeting style
+        #[arg(long, value_enum, default_value = "friendly")]
+        style: Style,
     },
     /// Machine-readable capability manifest
     #[command(visible_alias = "info")]

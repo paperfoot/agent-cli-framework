@@ -49,7 +49,7 @@ example/
 
 ## Guidelines
 
-- The example must demonstrate every pattern described in the README. If the README shows it, the example should use it.
+- The example demonstrates the five core patterns plus the entry point, error type, and output helpers. Reusable modules like config loading, secret handling, and HTTP retry are documented as code patterns in the README -- they don't need to be in the example.
 - Keep the example minimal -- it demonstrates patterns, not a real product.
 - Ensure the README, AGENTS.md, and example stay consistent with each other.
 

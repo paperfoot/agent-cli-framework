@@ -3,6 +3,8 @@
 /// - Terminal (TTY): colored human output
 /// - Piped/redirected: JSON envelope
 /// - `--json` flag: force JSON even in terminal
+///
+/// All JSON serialization goes through safe_json_string() which never panics.
 
 use serde::Serialize;
 use std::io::IsTerminal;
@@ -32,15 +34,31 @@ impl Format {
     }
 }
 
-// ── Envelope helpers ────────────────────────────────────────────────────────
+// ── Safe JSON serialization ─────────────────────────────────────────────────
 
-fn to_json_pretty<T: Serialize>(value: &T) -> String {
-    serde_json::to_string_pretty(value).unwrap_or_else(|e| {
-        format!(
-            r#"{{"version":"1","status":"error","error":{{"code":"serialize","message":"{e}","suggestion":"Retry the command"}}}}"#
-        )
-    })
+/// Serialize to pretty JSON. On failure, return a valid JSON error envelope
+/// built entirely from serde_json (no string interpolation, no panic risk).
+fn safe_json_string<T: Serialize>(value: &T) -> String {
+    match serde_json::to_string_pretty(value) {
+        Ok(s) => s,
+        Err(e) => {
+            // Build fallback with serde_json to guarantee valid JSON.
+            let fallback = serde_json::json!({
+                "version": "1",
+                "status": "error",
+                "error": {
+                    "code": "serialize",
+                    "message": e.to_string(),
+                    "suggestion": "Retry the command",
+                },
+            });
+            serde_json::to_string_pretty(&fallback)
+                .unwrap_or_else(|_| r#"{"version":"1","status":"error","error":{"code":"serialize","message":"serialization failed","suggestion":"Retry the command"}}"#.to_string())
+        }
+    }
 }
+
+// ── Envelope helpers ────────────────────────────────────────────────────────
 
 /// Print success envelope (JSON) or call the human closure.
 pub fn print_success_or<T: Serialize, F: FnOnce(&T)>(format: Format, data: &T, human: F) {
@@ -51,7 +69,7 @@ pub fn print_success_or<T: Serialize, F: FnOnce(&T)>(format: Format, data: &T, h
                 "status": "success",
                 "data": data,
             });
-            println!("{}", to_json_pretty(&envelope));
+            println!("{}", safe_json_string(&envelope));
         }
         Format::Human => human(data),
     }
@@ -69,7 +87,7 @@ pub fn print_error(format: Format, err: &AppError) {
         },
     });
     match format {
-        Format::Json => eprintln!("{}", to_json_pretty(&envelope)),
+        Format::Json => eprintln!("{}", safe_json_string(&envelope)),
         Format::Human => {
             use owo_colors::OwoColorize;
             eprintln!("{} {}", "error:".red().bold(), err);
@@ -78,8 +96,20 @@ pub fn print_error(format: Format, err: &AppError) {
     }
 }
 
-/// Wrap a clap parse error in the JSON envelope (for piped contexts).
-pub fn print_clap_error(format: Format, err: clap::Error) {
+/// Wrap --help / --version output in a success JSON envelope.
+pub fn print_help_json(err: clap::Error) {
+    let envelope = serde_json::json!({
+        "version": "1",
+        "status": "success",
+        "data": { "usage": err.to_string().trim_end() },
+    });
+    println!("{}", safe_json_string(&envelope));
+}
+
+/// Wrap a clap parse error appropriately. In JSON mode, emit a structured
+/// error envelope to stderr. In human mode, print the error and suggestion
+/// WITHOUT calling err.exit() — we own the exit code, not clap.
+pub fn print_clap_error(format: Format, err: &clap::Error) {
     match format {
         Format::Json => {
             let envelope = serde_json::json!({
@@ -91,8 +121,11 @@ pub fn print_clap_error(format: Format, err: clap::Error) {
                     "suggestion": "Check arguments with: greeter --help",
                 },
             });
-            eprintln!("{}", to_json_pretty(&envelope));
+            eprintln!("{}", safe_json_string(&envelope));
         }
-        Format::Human => err.exit(),
+        Format::Human => {
+            // Render clap's error message to stderr without letting clap exit.
+            eprint!("{err}");
+        }
     }
 }

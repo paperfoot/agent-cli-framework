@@ -14,12 +14,20 @@ mod error;
 mod output;
 
 use clap::Parser;
-use std::io::IsTerminal;
 
 use cli::{Cli, Commands, SkillAction};
 use output::Format;
 
+/// Pre-scan argv for --json before clap parses. This ensures --json is
+/// honored even on help, version, and parse-error paths where clap hasn't
+/// populated the Cli struct yet.
+fn has_json_flag() -> bool {
+    std::env::args_os().any(|a| a == "--json")
+}
+
 fn main() {
+    let json_flag = has_json_flag();
+
     // Use try_parse so clap errors go through the JSON envelope instead of
     // printing human-only text that breaks agent pipelines.
     let cli = match Cli::try_parse() {
@@ -31,21 +39,19 @@ fn main() {
                 clap::error::ErrorKind::DisplayHelp
                     | clap::error::ErrorKind::DisplayVersion
             ) {
-                if !std::io::stdout().is_terminal() {
-                    let envelope = serde_json::json!({
-                        "version": "1",
-                        "status": "success",
-                        "data": { "usage": e.to_string().trim_end() },
-                    });
-                    println!("{}", serde_json::to_string_pretty(&envelope).unwrap());
-                    std::process::exit(0);
+                let format = Format::detect(json_flag);
+                match format {
+                    Format::Json => {
+                        output::print_help_json(e);
+                        std::process::exit(0);
+                    }
+                    Format::Human => e.exit(), // clap prints coloured help, exits 0
                 }
-                e.exit(); // clap prints coloured help and exits 0
             }
 
-            // Actual parse errors -- wrap in envelope when piped.
-            let format = Format::detect(false);
-            output::print_clap_error(format, e);
+            // Actual parse errors -- always exit 3, never let clap own the exit.
+            let format = Format::detect(json_flag);
+            output::print_clap_error(format, &e);
             std::process::exit(3);
         }
     };

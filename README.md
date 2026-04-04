@@ -200,7 +200,7 @@ See [Philosophy #5](#5-exit-codes-are-contracts). Every command, every code path
 
 ### Pattern 4: Skill Self-Install
 
-The binary carries a minimal SKILL.md compiled in via `include_str!`. One command writes it to agent platform directories:
+The binary carries a minimal SKILL.md as an embedded constant (via `const` or `include_str!`). One command writes it to agent platform directories:
 
 ```
 ~/.claude/skills/<name>/SKILL.md
@@ -375,10 +375,18 @@ Adapt the variants to your domain. The three methods (`exit_code`, `error_code`,
 
 ### Entry Point Runner
 
-The `main()` function follows a strict pattern: parse with `try_parse()`, handle help/version as success, wrap clap errors in the envelope, detect format, dispatch, exit with semantic code.
+The `main()` function follows a strict pattern: pre-scan for `--json`, parse with `try_parse()`, handle help/version as success, wrap clap errors in the envelope (never let clap own the exit code), detect format, dispatch, exit with semantic code.
 
 ```rust
+/// Pre-scan argv for --json before clap parses. This ensures --json is
+/// honored on help, version, and parse-error paths.
+fn has_json_flag() -> bool {
+    std::env::args_os().any(|a| a == "--json")
+}
+
 fn main() {
+    let json_flag = has_json_flag();
+
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(e) => {
@@ -388,36 +396,20 @@ fn main() {
                 clap::error::ErrorKind::DisplayHelp
                     | clap::error::ErrorKind::DisplayVersion
             ) {
-                if !std::io::stdout().is_terminal() {
-                    let envelope = serde_json::json!({
-                        "version": "1",
-                        "status": "success",
-                        "data": { "usage": e.to_string().trim_end() },
-                    });
-                    println!("{}", serde_json::to_string_pretty(&envelope).unwrap());
-                    std::process::exit(0);
+                let format = Format::detect(json_flag);
+                match format {
+                    Format::Json => {
+                        print_help_json(e);
+                        std::process::exit(0);
+                    }
+                    Format::Human => e.exit(),
                 }
-                e.exit(); // clap prints colored help, exits 0
             }
 
-            // Actual parse errors
-            let format = Format::detect(false);
-            match format {
-                Format::Json => {
-                    let envelope = serde_json::json!({
-                        "version": "1",
-                        "status": "error",
-                        "error": {
-                            "code": "invalid_input",
-                            "message": e.to_string(),
-                            "suggestion": "Check arguments with --help",
-                        },
-                    });
-                    eprintln!("{}", serde_json::to_string_pretty(&envelope).unwrap());
-                    std::process::exit(3);
-                }
-                Format::Human => e.exit(),
-            }
+            // Parse errors -- we own the exit code, not clap. Always exit 3.
+            let format = Format::detect(json_flag);
+            print_clap_error(format, &e);
+            std::process::exit(3);
         }
     };
 
@@ -514,15 +506,19 @@ pub fn resolve_secret(
 }
 
 /// Mask a secret for display: "sk-proj-abc...xyz1234"
+/// Uses char boundaries (not byte offsets) to avoid panics on non-ASCII input.
 pub fn mask_secret(value: &str) -> String {
     if value.is_empty() {
         return "(not set)".to_string();
     }
-    let len = value.len();
-    if len <= 8 {
-        format!("{}***", &value[..2])
+    let chars: Vec<char> = value.chars().collect();
+    if chars.len() <= 8 {
+        let prefix: String = chars[..2.min(chars.len())].iter().collect();
+        format!("{prefix}***")
     } else {
-        format!("{}...{}", &value[..4], &value[len - 4..])
+        let prefix: String = chars[..4].iter().collect();
+        let suffix: String = chars[chars.len() - 4..].iter().collect();
+        format!("{prefix}...{suffix}")
     }
 }
 ```
@@ -625,14 +621,14 @@ pub fn should_retry(err: &reqwest::Error) -> bool {
 
 ## Example
 
-The `example/` directory contains a modular `greeter` CLI demonstrating every pattern. It's structured the way a real CLI should be -- split into focused files, not a single 500-line main.rs.
+The `example/` directory contains a modular `greeter` CLI demonstrating the five core patterns (agent-info, JSON envelope, semantic exit codes, skill self-install, self-update) and the reusable entry point, error type, and output helpers. Config loading, secret handling, XDG paths, and HTTP retry are documented as code patterns in the Reusable Modules section above -- copy them into your CLI when you need them.
 
 ```
 example/
   src/
     main.rs         # Entry point -- parse, detect format, dispatch, exit
     cli.rs          # Clap definitions: Cli struct + Commands enum
-    error.rs        # AppError enum implementing CliError trait
+    error.rs        # AppError enum with exit_code(), error_code(), suggestion()
     output.rs       # Format detection + envelope helpers
     commands/
       mod.rs        # Command router

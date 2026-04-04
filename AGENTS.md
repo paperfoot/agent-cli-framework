@@ -79,8 +79,15 @@ Standard categories: `InvalidInput` (3), `Config` (2), `Transient`/`Io`/`Update`
 
 ## Entry Point Pattern
 
+Pre-scan `--json` before clap parses so it works on help/version/error paths. Never let clap own the exit code — always exit explicitly through the framework.
+
 ```rust
+fn has_json_flag() -> bool {
+    std::env::args_os().any(|a| a == "--json")
+}
+
 fn main() {
+    let json_flag = has_json_flag();
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(e) => {
@@ -88,15 +95,15 @@ fn main() {
                 clap::error::ErrorKind::DisplayHelp
                 | clap::error::ErrorKind::DisplayVersion
             ) {
-                // Exit 0, wrap in envelope if piped
-                if !std::io::stdout().is_terminal() {
-                    println!("{}", serde_json::json!({"version":"1","status":"success","data":{"usage":e.to_string().trim_end()}}));
-                    std::process::exit(0);
+                let format = Format::detect(json_flag);
+                match format {
+                    Format::Json => { print_help_json(e); std::process::exit(0); }
+                    Format::Human => e.exit(),
                 }
-                e.exit();
             }
-            let format = Format::detect(false);
-            print_clap_error(format, e);
+            // Parse errors: we own the exit code, always 3
+            let format = Format::detect(json_flag);
+            print_clap_error(format, &e);
             std::process::exit(3);
         }
     };
@@ -137,7 +144,7 @@ Always alias CRUD subcommands: `list`/`ls`, `create`/`new`, `delete`/`rm`, `show
 
 Every CLI has these built-in commands:
 - `agent-info` (alias `info`) -- capability manifest, raw JSON, not wrapped in envelope
-- `skill install` -- write SKILL.md to `~/.claude/`, `~/.codex/`, `~/.gemini/`
+- `skill install` -- write SKILL.md to `~/.claude/skills/<name>/`, `~/.codex/skills/<name>/`, `~/.gemini/skills/<name>/`
 - `skill status` -- check installation status
 
 Optional:
@@ -172,4 +179,4 @@ opt-level = 3
 
 ## Reference
 
-See the `example/` directory in this repo for a complete working implementation of all patterns.
+See the `example/` directory in this repo for a working implementation of the five core patterns and the entry point, error type, and output helpers. Config loading, secret handling, XDG paths, and HTTP retry are documented as code patterns in the README's Reusable Modules section.
