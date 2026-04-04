@@ -82,7 +82,7 @@ If `inbox list` works, `account list` works. If `--json` forces JSON in one CLI,
 
 ### 8. Self-contained and portable
 
-The binary carries its own skill file (`include_str!`). `skill install` deploys it. `update` replaces the binary from GitHub Releases. One artifact. The self-update mechanism is opt-in -- CLIs distributed via package managers or in managed environments should disable it.
+The binary carries its own skill file as an embedded constant (via `const` or `include_str!`). `skill install` deploys it. `update` replaces the binary from GitHub Releases. One artifact. The self-update mechanism is opt-in -- CLIs distributed via package managers or in managed environments should disable it.
 
 ### 9. Speed is a feature
 
@@ -236,9 +236,9 @@ Self-update should be disableable via config (`update.enabled = false`) for mana
 
 These are battle-tested patterns extracted from production CLIs. Each module is self-contained -- copy the pattern into your CLI and adapt.
 
-### Output Format Detection
+### Output Format Detection and Context
 
-Every CLI needs this. Detect whether to output JSON or human-readable, based on `--json` flag or pipe detection.
+Detect whether to output JSON or human-readable, based on `--json` flag or pipe detection. Bundle format + quiet into a `Ctx` that gets passed to all commands.
 
 ```rust
 #[derive(Clone, Copy)]
@@ -255,39 +255,62 @@ impl Format {
             Format::Human
         }
     }
+}
 
-    pub fn is_json(self) -> bool {
-        matches!(self, Format::Json)
+/// Output context: bundles format + quiet so commands take one parameter.
+#[derive(Clone, Copy)]
+pub struct Ctx {
+    pub format: Format,
+    pub quiet: bool,
+}
+
+impl Ctx {
+    pub fn new(json_flag: bool, quiet: bool) -> Self {
+        Self { format: Format::detect(json_flag), quiet }
     }
 }
 ```
 
 ### JSON Envelope Helpers
 
-`print_success_or` is the workhorse -- it handles JSON automatically and lets you provide a closure for human output. `print_error` sends errors to stderr in both formats.
+`print_success_or` is the workhorse -- it handles JSON automatically and lets you provide a closure for human output. `--quiet` suppresses human output; JSON always emits. `print_error` sends errors to stderr in both formats (never suppressed by `--quiet`).
 
 ```rust
 use serde::Serialize;
 
-fn to_json_pretty<T: Serialize>(value: &T) -> String {
-    serde_json::to_string_pretty(value).unwrap_or_else(|e| {
-        format!(
-            r#"{{"version":"1","status":"error","error":{{"code":"serialize","message":"{e}"}}}}"#
-        )
-    })
+/// Safe serialization: never panics, never produces invalid JSON.
+fn safe_json_string<T: Serialize>(value: &T) -> String {
+    match serde_json::to_string_pretty(value) {
+        Ok(s) => s,
+        Err(e) => {
+            let fallback = serde_json::json!({
+                "version": "1",
+                "status": "error",
+                "error": {
+                    "code": "serialize",
+                    "message": e.to_string(),
+                    "suggestion": "Retry the command",
+                },
+            });
+            serde_json::to_string_pretty(&fallback).unwrap_or_else(|_| {
+                r#"{"version":"1","status":"error","error":{"code":"serialize","message":"serialization failed","suggestion":"Retry the command"}}"#.to_string()
+            })
+        }
+    }
 }
 
-pub fn print_success_or<T: Serialize, F: FnOnce(&T)>(format: Format, data: &T, human: F) {
-    match format {
+pub fn print_success_or<T: Serialize, F: FnOnce(&T)>(ctx: Ctx, data: &T, human: F) {
+    match ctx.format {
         Format::Json => {
             let envelope = serde_json::json!({
                 "version": "1",
                 "status": "success",
                 "data": data,
             });
-            println!("{}", to_json_pretty(&envelope));
+            println!("{}", safe_json_string(&envelope));
         }
-        Format::Human => human(data),
+        Format::Human if !ctx.quiet => human(data),
+        Format::Human => {} // quiet: suppress human output
     }
 }
 
@@ -302,7 +325,7 @@ pub fn print_error(format: Format, err: &AppError) {
         },
     });
     match format {
-        Format::Json => eprintln!("{}", to_json_pretty(&envelope)),
+        Format::Json => eprintln!("{}", safe_json_string(&envelope)),
         Format::Human => {
             eprintln!("error: {err}");
             eprintln!("  {}", err.suggestion());
@@ -415,10 +438,10 @@ fn main() {
         }
     };
 
-    let format = Format::detect(cli.json);
+    let ctx = Ctx::new(cli.json, cli.quiet);
 
-    if let Err(e) = run(cli, format) {
-        print_error(format, &e);
+    if let Err(e) = run(cli, ctx) {
+        print_error(ctx.format, &e);
         std::process::exit(e.exit_code());
     }
 }
@@ -684,21 +707,29 @@ The framework conventions (`env!("CARGO_PKG_NAME")`, config loading, skill insta
 
 ## Example
 
-The `example/` directory contains a modular `greeter` CLI demonstrating the five core patterns (agent-info, JSON envelope, semantic exit codes, skill self-install, self-update) and the reusable entry point, error type, and output helpers. Config loading, secret handling, XDG paths, and HTTP retry are documented as code patterns in the Reusable Modules section above -- copy them into your CLI when you need them.
+The `example/` directory contains a modular `greeter` CLI demonstrating all core patterns: agent-info with argument schemas, JSON envelope, semantic exit codes (0-4), `--json` pre-scan, `--quiet` flag, config loading via Figment, skill self-install, and self-update. It includes 40 integration tests that verify every contract.
 
 ```
 example/
   src/
-    main.rs         # Entry point -- parse, detect format, dispatch, exit
-    cli.rs          # Clap definitions: Cli struct + Commands enum
-    error.rs        # AppError enum with exit_code(), error_code(), suggestion()
-    output.rs       # Format detection + envelope helpers
+    main.rs           # Entry point -- pre-scan --json, parse, dispatch, exit
+    cli.rs            # Clap definitions: Cli, Commands, Style (ValueEnum)
+    config.rs         # 3-tier config loading (defaults -> TOML -> env vars)
+    error.rs          # AppError with exit_code(), error_code(), suggestion()
+    output.rs         # Format detection, Ctx struct, envelope helpers
     commands/
-      mod.rs        # Command router
-      hello.rs      # Domain command (the actual feature)
-      agent_info.rs # Capability manifest
-      skill.rs      # Skill install + status
-      update.rs     # Self-update
+      mod.rs          # Command router
+      hello.rs        # Domain command (the actual feature)
+      agent_info.rs   # Enriched capability manifest with arg schemas
+      config.rs       # config show / config path
+      skill.rs        # Skill install + status
+      update.rs       # Self-update
+      contract.rs     # Hidden: deterministic exit-code trigger for tests
+  tests/
+    exit_code_contracts.rs    # All 5 exit codes verified
+    output_contracts.rs       # JSON envelope shape, quiet flag, help wrapping
+    agent_info_contract.rs    # Manifest fields, routable commands, arg schemas
+    robustness.rs             # Malformed config resilience, edge cases
   Cargo.toml
 ```
 
