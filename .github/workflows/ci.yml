@@ -25,6 +25,14 @@ jobs:
         with:
           workspaces: example
 
+      - name: Format
+        working-directory: example
+        run: cargo fmt --check
+
+      - name: Clippy
+        working-directory: example
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
       - name: Build
         working-directory: example
         run: cargo build --locked

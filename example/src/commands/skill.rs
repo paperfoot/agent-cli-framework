@@ -74,9 +74,7 @@ pub fn install(ctx: Ctx) -> Result<(), AppError> {
     for target in &skill_targets() {
         let skill_path = target.path.join("SKILL.md");
 
-        if skill_path.exists()
-            && std::fs::read_to_string(&skill_path).is_ok_and(|c| c == content)
-        {
+        if skill_path.exists() && std::fs::read_to_string(&skill_path).is_ok_and(|c| c == content) {
             results.push(InstallResult {
                 platform: target.name.into(),
                 path: skill_path.display().to_string(),
@@ -126,8 +124,7 @@ pub fn status(ctx: Ctx) -> Result<(), AppError> {
     for target in &skill_targets() {
         let skill_path = target.path.join("SKILL.md");
         let (installed, current) = if skill_path.exists() {
-            let current =
-                std::fs::read_to_string(&skill_path).is_ok_and(|c| c == content);
+            let current = std::fs::read_to_string(&skill_path).is_ok_and(|c| c == content);
             (true, current)
         } else {
             (false, false)

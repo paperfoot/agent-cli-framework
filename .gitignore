@@ -1,5 +1,7 @@
 target/
+.DS_Store
 .claude/
 .agents/
 .cursor/
 .windsurf/
+.github/skills/autoresearch/SKILL.md

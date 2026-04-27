@@ -61,7 +61,7 @@ pub fn run() {
                 "options": []
             },
             "update": {
-                "description": "Self-update binary from GitHub Releases",
+                "description": "Distribution-aware update check/apply",
                 "args": [],
                 "options": [
                     {
@@ -71,6 +71,31 @@ pub fn run() {
                         "default": false,
                         "description": "Check only, don't install"
                     }
+                ],
+                "install_sources": [
+                    "standalone",
+                    "homebrew",
+                    "cargo",
+                    "cargo_binstall",
+                    "npm",
+                    "bun",
+                    "uv_tool",
+                    "pipx",
+                    "winget",
+                    "scoop",
+                    "apt",
+                    "managed",
+                    "unknown"
+                ],
+                "data_fields": [
+                    "current_version",
+                    "latest_version",
+                    "status",
+                    "install_source",
+                    "update_mode",
+                    "upgrade_command",
+                    "release_url",
+                    "requires_skill_reinstall"
                 ]
             }
         },

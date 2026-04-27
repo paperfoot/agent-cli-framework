@@ -53,10 +53,7 @@ fn exit_codes_cover_full_contract() {
 
 #[test]
 fn hello_is_routable() {
-    greeter()
-        .args(["hello", "Test"])
-        .assert()
-        .code(0);
+    greeter().args(["hello", "Test"]).assert().code(0);
 }
 
 #[test]

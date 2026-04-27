@@ -14,20 +14,34 @@ pub struct AppConfig {
     /// Default greeting style
     pub style: String,
 
-    /// Self-update settings
+    /// Update settings
     pub update: UpdateConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateConfig {
-    /// Enable or disable self-update
+    /// Enable or disable update checks/apply.
     pub enabled: bool,
+
+    /// Install source: auto, standalone, homebrew, cargo, cargo_binstall,
+    /// npm, bun, uv_tool, pipx, winget, scoop, apt, managed, or unknown.
+    #[serde(alias = "source")]
+    pub install_source: String,
 
     /// GitHub repository owner
     pub owner: String,
 
     /// GitHub repository name
     pub repo: String,
+
+    /// crates.io package name
+    pub crate_name: String,
+
+    /// Homebrew formula name
+    pub formula: String,
+
+    /// Optional Homebrew tap, for example owner/tap
+    pub tap: String,
 }
 
 impl Default for AppConfig {
@@ -43,8 +57,12 @@ impl Default for UpdateConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            install_source: "auto".into(),
             owner: "199-biotechnologies".into(),
             repo: "agent-cli-framework".into(),
+            crate_name: env!("CARGO_PKG_NAME").into(),
+            formula: env!("CARGO_PKG_NAME").into(),
+            tap: "199-biotechnologies/tap".into(),
         }
     }
 }
@@ -61,8 +79,8 @@ pub fn config_path() -> PathBuf {
 // ── Loading ────────────────────────────────────────────────────────────────
 
 pub fn load() -> Result<AppConfig, AppError> {
-    use figment::providers::{Env, Format as _, Serialized, Toml};
     use figment::Figment;
+    use figment::providers::{Env, Format as _, Serialized, Toml};
 
     let prefix = format!("{}_", env!("CARGO_PKG_NAME").to_uppercase());
 

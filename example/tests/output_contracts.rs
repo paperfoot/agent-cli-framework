@@ -13,10 +13,7 @@ fn greeter() -> Command {
 
 #[test]
 fn success_envelope_shape() {
-    let out = greeter()
-        .args(["hello", "World"])
-        .output()
-        .unwrap();
+    let out = greeter().args(["hello", "World"]).output().unwrap();
 
     assert!(out.status.success());
 
@@ -25,7 +22,10 @@ fn success_envelope_shape() {
 
     assert_eq!(json["version"], "1");
     assert_eq!(json["status"], "success");
-    assert!(json["data"].is_object(), "envelope must have a 'data' field");
+    assert!(
+        json["data"].is_object(),
+        "envelope must have a 'data' field"
+    );
     assert_eq!(json["data"]["name"], "World");
 }
 
@@ -47,10 +47,7 @@ fn success_envelope_with_json_flag() {
 
 #[test]
 fn error_envelope_shape() {
-    let out = greeter()
-        .args(["contract", "3"])
-        .output()
-        .unwrap();
+    let out = greeter().args(["contract", "3"]).output().unwrap();
 
     assert!(!out.status.success());
 
@@ -60,10 +57,19 @@ fn error_envelope_shape() {
 
     assert_eq!(json["version"], "1");
     assert_eq!(json["status"], "error");
-    assert!(json["error"].is_object(), "error envelope must have 'error' field");
+    assert!(
+        json["error"].is_object(),
+        "error envelope must have 'error' field"
+    );
     assert!(json["error"]["code"].is_string(), "error must have 'code'");
-    assert!(json["error"]["message"].is_string(), "error must have 'message'");
-    assert!(json["error"]["suggestion"].is_string(), "error must have 'suggestion'");
+    assert!(
+        json["error"]["message"].is_string(),
+        "error must have 'message'"
+    );
+    assert!(
+        json["error"]["suggestion"].is_string(),
+        "error must have 'suggestion'"
+    );
 }
 
 #[test]
@@ -137,8 +143,10 @@ fn parse_error_wrapped_in_envelope() {
 
     assert_eq!(json["status"], "error");
     assert_eq!(json["error"]["code"], "invalid_input");
-    assert!(json["error"]["suggestion"]
-        .as_str()
-        .unwrap()
-        .contains("--help"));
+    assert!(
+        json["error"]["suggestion"]
+            .as_str()
+            .unwrap()
+            .contains("--help")
+    );
 }

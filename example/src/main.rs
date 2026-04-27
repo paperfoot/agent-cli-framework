@@ -8,7 +8,7 @@
 //!   - `agent-info` for machine-readable capability discovery
 //!   - `config show/path` for configuration management
 //!   - `skill install` to register with AI agent platforms
-//!   - `update` for self-update via GitHub Releases
+//!   - `update` for distribution-aware update checks
 
 mod cli;
 mod commands;
@@ -39,8 +39,7 @@ fn main() {
             // Help and --version are NOT errors. Exit 0.
             if matches!(
                 e.kind(),
-                clap::error::ErrorKind::DisplayHelp
-                    | clap::error::ErrorKind::DisplayVersion
+                clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
             ) {
                 let format = Format::detect(json_flag);
                 match format {
@@ -75,9 +74,7 @@ fn main() {
             SkillAction::Status => commands::skill::status(ctx),
         },
         Commands::Config { action } => match action {
-            ConfigAction::Show => {
-                config::load().and_then(|cfg| commands::config::show(ctx, &cfg))
-            }
+            ConfigAction::Show => config::load().and_then(|cfg| commands::config::show(ctx, &cfg)),
             ConfigAction::Path => commands::config::path(ctx),
         },
         Commands::Update { check } => {

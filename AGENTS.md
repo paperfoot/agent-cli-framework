@@ -24,7 +24,7 @@ src/
     skill.rs      # Skill install + status (always present)
     config.rs     # config show/path (always present)
     doctor.rs     # Dependency diagnostics (optional, recommended)
-    update.rs     # Self-update (optional)
+    update.rs     # Distribution-aware update (optional)
   tests/          # Integration tests verifying contracts
   Cargo.toml
 ```
@@ -171,7 +171,7 @@ Standard:
 
 Optional:
 - `doctor` -- check external dependencies (API keys, binaries, endpoints). Returns structured pass/warn/fail. Exit 0 if all pass, exit 2 if any fail.
-- `update [--check]` -- self-update from GitHub Releases
+- `update [--check]` -- distribution-aware update check/apply
 
 ## Rich Help
 
@@ -214,6 +214,37 @@ For commands that do expensive or irreversible work (API calls, long computation
 6. `--force` flag bypasses the guard
 
 Lock file format: `{"pid": 12345, "started_at": "2026-04-12T10:00:00Z", "operation": "deploy"}`
+
+## Update Standard
+
+The update rule is one command, distribution-aware update paths.
+
+`update --check` is always safe: no filesystem mutation, no package-manager
+upgrade, no shell profile changes, no raw stdout leaks, and exit 0 when the
+check completes even if a new version exists.
+
+`update` must respect the channel that owns the installed binary:
+
+- Standalone installer binary: may self-replace from GitHub Releases after exact
+  platform asset selection, HTTPS download, SHA256 verification, optional
+  attestation/signature verification, temp-file staging, `<new-binary> --version`
+  validation, and atomic replacement.
+- Homebrew install: do not self-replace; use or return `brew upgrade <formula>`.
+- Cargo install: do not self-replace; use or return `cargo install --locked --force <crate>` or `cargo binstall --no-confirm <crate>` when supported.
+- npm, Bun package-manager, uv tool, pipx, winget, scoop, apt, and enterprise-managed installs:
+  defer to the owning package manager or internal rollout process.
+- Unknown install source: return `update_mode = "instructions_only"` instead of
+  blindly replacing the current executable.
+
+`update --check --json` must return a success envelope with
+`current_version`, `latest_version`, `status`, `install_source`, `update_mode`,
+`upgrade_command`, `release_url`, and `requires_skill_reinstall`.
+
+Release artifacts should be built in CI, not on a developer laptop. For Rust
+CLIs, prefer cargo-dist or an equivalent release pipeline that produces GitHub
+Release archives, checksums, Homebrew formulae, cargo-binstall-compatible
+artifacts, and optional GitHub artifact attestations. See
+`docs/update-standard.md` for the full policy and required tests.
 
 ## Reference
 

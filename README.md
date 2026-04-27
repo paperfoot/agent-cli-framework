@@ -82,7 +82,7 @@ If `inbox list` works, `account list` works. If `--json` forces JSON in one CLI,
 
 ### 8. Self-contained and portable
 
-The binary carries its own skill file as an embedded constant (via `const` or `include_str!`). `skill install` deploys it. `update` replaces the binary from GitHub Releases. One artifact. The self-update mechanism is opt-in -- CLIs distributed via package managers or in managed environments should disable it.
+The binary carries its own skill file as an embedded constant (via `const` or `include_str!`). `skill install` deploys it. `update` is one command with distribution-aware behavior: standalone installer binaries may self-replace from GitHub Releases, but Homebrew, Cargo, npm, pipx, winget, apt, and managed installs must defer to the package manager or return the exact tested upgrade command. Self-update is opt-in and must be disableable in managed environments.
 
 ### 9. Speed is a feature
 
@@ -129,7 +129,7 @@ The binary describes itself. One command returns a JSON manifest of everything t
     "config set <key> <value>": "Set a configuration value.",
     "agent-info | info": "This manifest.",
     "skill install": "Install skill file to agent platforms.",
-    "update [--check]": "Self-update from GitHub Releases."
+    "update [--check]": "Distribution-aware update check/apply."
   },
   "flags": {
     "--json": "Force JSON output (auto-enabled when piped)",
@@ -290,9 +290,9 @@ mycli deploy                  # "Operation already running. Use --force to overr
 mycli deploy --force          # Bypasses guard
 ```
 
-### Pattern 5: Self-Update
+### Pattern 5: Update
 
-Three install paths, one update mechanism:
+One command, distribution-aware update paths:
 
 ```bash
 # Install (pick any):
@@ -300,13 +300,21 @@ brew tap your-org/tap && brew install your-cli
 cargo install your-cli
 curl -fsSL https://your-cli.dev/install.sh | sh
 
-# Self-update (built into the binary):
-your-cli update --check      # check for new version
-your-cli update              # pull latest from GitHub Releases
+# Agent-facing update command:
+your-cli update --check      # safe check, no mutation
+your-cli update              # update via the owning channel, or return exact instructions
 your-cli skill install       # re-deploy updated skill
 ```
 
-Self-update should be disableable via config (`update.enabled = false`) for managed environments.
+Rules:
+
+- Standalone installer install: may self-replace from GitHub Releases after asset selection, checksum/provenance verification, temp-file staging, version check, and atomic replacement.
+- Homebrew install: never self-replace; use `brew upgrade <formula>`.
+- Cargo install: never self-replace; use `cargo install --locked --force <crate>` or `cargo binstall --no-confirm <crate>` when supported.
+- npm, Bun package-manager, uv tool, pipx, winget, scoop, apt, and enterprise installs: defer to the owning package manager.
+- Managed environment: support `update.enabled = false` and return `status: "disabled"` with the internal upgrade instruction.
+
+`update --check --json` returns a normal success envelope whose `data` includes `current_version`, `latest_version`, `status`, `install_source`, `update_mode`, `upgrade_command`, `release_url`, and `requires_skill_reinstall`. See [docs/update-standard.md](docs/update-standard.md) for the full standard, release pipeline, and required tests.
 
 ---
 
@@ -978,7 +986,7 @@ src/
     your_command.rs  # Your domain logic
     skill.rs        # Skill content auto-derived from CARGO_PKG_NAME
     config.rs       # config show/path (works out of the box)
-    update.rs       # Self-update (just change repo owner/name in config)
+    update.rs       # Distribution-aware update (set owner/repo/crate/brew names)
 ```
 
 **4. Update `agent-info`** to list your actual commands with argument schemas. This is the contract agents bootstrap from.
@@ -1005,7 +1013,7 @@ The framework conventions (`env!("CARGO_PKG_NAME")`, config loading, skill insta
 
 ## Example
 
-The `example/` directory contains a modular `greeter` CLI demonstrating all core patterns: agent-info with argument schemas, JSON envelope, semantic exit codes (0-4), `--json` pre-scan, `--quiet` flag, config loading via Figment, skill self-install, and self-update. It includes 40 integration tests that verify every contract.
+The `example/` directory contains a modular `greeter` CLI demonstrating all core patterns: agent-info with argument schemas, JSON envelope, semantic exit codes (0-4), `--json` pre-scan, `--quiet` flag, config loading via Figment, skill self-install, and distribution-aware update output. It includes integration tests that verify the contracts.
 
 ```
 example/
@@ -1021,7 +1029,7 @@ example/
       agent_info.rs   # Enriched capability manifest with arg schemas
       config.rs       # config show / config path
       skill.rs        # Skill install + status
-      update.rs       # Self-update
+      update.rs       # Distribution-aware update
       contract.rs     # Hidden: deterministic exit-code trigger for tests
   tests/
     exit_code_contracts.rs    # All 5 exit codes verified
@@ -1135,7 +1143,7 @@ libc = "0.2"
 # HTTP (if making network calls)
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 
-# Self-update (optional)
+# Update (optional standalone self-replace)
 self_update = { version = "0.42", features = ["archive-tar", "compression-flate2"] }
 
 [profile.release]

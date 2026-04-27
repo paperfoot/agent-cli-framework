@@ -48,11 +48,9 @@ impl AppError {
 
     pub fn suggestion(&self) -> &str {
         match self {
-            Self::InvalidInput(_) => concat!(
-                "Check arguments with: ",
-                env!("CARGO_PKG_NAME"),
-                " --help"
-            ),
+            Self::InvalidInput(_) => {
+                concat!("Check arguments with: ", env!("CARGO_PKG_NAME"), " --help")
+            }
             Self::Config(_) => concat!(
                 "Check config with: ",
                 env!("CARGO_PKG_NAME"),

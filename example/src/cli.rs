@@ -57,7 +57,7 @@ pub enum Commands {
         #[command(subcommand)]
         action: ConfigAction,
     },
-    /// Self-update from GitHub Releases
+    /// Distribution-aware update check/apply
     Update {
         /// Check only, don't install
         #[arg(long)]
