@@ -1,129 +1,141 @@
-//! Duplicate guard: prevent expensive or irreversible operations from
-//! running twice concurrently (agent retries, two agents hitting the same
-//! CLI). Lock file with PID + timestamp in the state directory; locks from
-//! dead processes or older than one hour are treated as stale and overwritten.
-
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+//! Nonblocking process exclusion on macOS/Linux. The kernel owns the lock.
+//! Never unlink the file: replacing its inode lets another process bypass a
+//! live owner's lock. PID/timestamp are diagnostic metadata, not ownership.
+use std::fs::{File, OpenOptions};
+use std::io::Write;
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
 
-#[derive(Serialize, Deserialize)]
-struct LockFile {
-    pid: u32,
-    started_at: String,
-    operation: String,
-}
-
-const STALE_THRESHOLD_SECS: i64 = 3600; // 1 hour
-
+#[allow(dead_code)] // Reference primitive; the scaffold updater returns instructions.
 pub struct DuplicateGuard {
     lock_path: PathBuf,
+    file: Option<File>,
 }
 
+#[allow(dead_code)]
 impl DuplicateGuard {
-    pub fn new(data_dir: &std::path::Path, operation: &str) -> Self {
-        let lock_dir = data_dir.join("locks");
-        let _ = std::fs::create_dir_all(&lock_dir);
+    pub fn new(data_dir: &Path, operation: &str) -> Self {
         Self {
-            lock_path: lock_dir.join(format!("{operation}.lock")),
+            lock_path: data_dir.join("locks").join(format!("{operation}.lock")),
+            file: None,
         }
     }
 
-    /// Check whether the operation is already running. Returns Ok(()) when it
-    /// is safe to proceed and writes a fresh lock.
-    pub fn acquire(&self, force: bool) -> Result<(), AppError> {
-        if let Ok(contents) = std::fs::read_to_string(&self.lock_path) {
-            if let Ok(lock) = serde_json::from_str::<LockFile>(&contents) {
-                let pid_alive = unsafe { libc::kill(lock.pid as i32, 0) == 0 };
-                // Unparseable timestamps count as stale.
-                let is_stale = chrono::DateTime::parse_from_rfc3339(&lock.started_at)
-                    .map(|t| {
-                        chrono::Utc::now().signed_duration_since(t).num_seconds()
-                            > STALE_THRESHOLD_SECS
-                    })
-                    .unwrap_or(true);
-
-                if pid_alive && !is_stale && !force {
-                    return Err(AppError::InvalidInput(format!(
-                        "Operation '{}' already running (pid {}). Use --force to override.",
-                        lock.operation, lock.pid
-                    )));
-                }
-            }
+    pub fn acquire(&mut self, force: bool) -> Result<(), AppError> {
+        if force || self.file.is_some() {
+            return Ok(());
         }
-
-        let lock = LockFile {
-            pid: std::process::id(),
-            started_at: chrono::Utc::now().to_rfc3339(),
-            operation: self
-                .lock_path
-                .file_stem()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into(),
-        };
-        let contents =
-            serde_json::to_string(&lock).map_err(|e| AppError::Transient(e.to_string()))?;
-        std::fs::write(&self.lock_path, contents)?;
+        std::fs::create_dir_all(self.lock_path.parent().expect("lock directory"))?;
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(&self.lock_path)?;
+        // SAFETY: the descriptor is valid and remains open for the lock lifetime.
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            let error = std::io::Error::last_os_error();
+            return if error.kind() == std::io::ErrorKind::WouldBlock {
+                Err(AppError::OperationBusy)
+            } else {
+                Err(error.into())
+            };
+        }
+        let metadata = serde_json::json!({
+            "pid": std::process::id(),
+            "started_at": chrono::Utc::now().to_rfc3339(),
+            "operation": self.lock_path.file_stem().unwrap_or_default().to_string_lossy(),
+        });
+        let contents = serde_json::to_vec(&metadata).map_err(|_| AppError::Serialization)?;
+        file.set_len(0)?;
+        file.write_all(&contents)?;
+        // Early errors above close the local File and release only our lock.
+        self.file = Some(file);
         Ok(())
     }
-
-    /// Release the lock. Also called automatically on Drop, so early returns
-    /// and panics still clean up.
-    pub fn release(&self) {
-        let _ = std::fs::remove_file(&self.lock_path);
-    }
 }
-
-impl Drop for DuplicateGuard {
-    fn drop(&mut self) {
-        self.release();
-    }
-}
+// Dropping File releases the OS lock, including during unwinding. Process death
+// also releases it. No custom Drop or file deletion is needed.
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn second_acquire_conflicts_and_force_overrides() {
+    fn rejected_and_forced_callers_cannot_release_the_owner() {
         let tmp = tempfile::tempdir().unwrap();
-        let first = DuplicateGuard::new(tmp.path(), "op");
-        first.acquire(false).unwrap();
-
-        let second = DuplicateGuard::new(tmp.path(), "op");
-        let err = second.acquire(false).unwrap_err();
-        assert_eq!(err.exit_code(), 3);
-
-        second.acquire(true).unwrap();
+        let mut owner = DuplicateGuard::new(tmp.path(), "op");
+        owner.acquire(false).unwrap();
+        let contents = std::fs::read(&owner.lock_path).unwrap();
+        {
+            let mut rejected = DuplicateGuard::new(tmp.path(), "op");
+            assert_eq!(rejected.acquire(false).unwrap_err().exit_code(), 3);
+        }
+        {
+            let mut forced = DuplicateGuard::new(tmp.path(), "op");
+            forced.acquire(true).unwrap();
+        }
+        assert_eq!(std::fs::read(&owner.lock_path).unwrap(), contents);
+        let mut third = DuplicateGuard::new(tmp.path(), "op");
+        assert_eq!(
+            third.acquire(false).unwrap_err().error_code(),
+            "operation_busy"
+        );
+        let path = owner.lock_path.clone();
+        drop(owner);
+        assert!(path.exists(), "keep the inode stable");
+        third.acquire(false).unwrap();
     }
 
     #[test]
-    fn lock_released_on_drop() {
+    fn abandoned_metadata_does_not_block_new_owners() {
         let tmp = tempfile::tempdir().unwrap();
-        let lock_path = {
-            let guard = DuplicateGuard::new(tmp.path(), "op");
-            guard.acquire(false).unwrap();
-            guard.lock_path.clone()
-        };
-        assert!(!lock_path.exists());
-    }
-
-    #[test]
-    fn stale_lock_is_overwritten() {
-        let tmp = tempfile::tempdir().unwrap();
-        let lock_dir = tmp.path().join("locks");
-        std::fs::create_dir_all(&lock_dir).unwrap();
-        let two_hours_ago = chrono::Utc::now() - chrono::Duration::hours(2);
-        let stale = serde_json::json!({
-            "pid": std::process::id(),
-            "started_at": two_hours_ago.to_rfc3339(),
-            "operation": "op",
-        });
-        std::fs::write(lock_dir.join("op.lock"), stale.to_string()).unwrap();
-
-        let guard = DuplicateGuard::new(tmp.path(), "op");
+        let mut guard = DuplicateGuard::new(tmp.path(), "op");
+        std::fs::create_dir_all(guard.lock_path.parent().unwrap()).unwrap();
+        std::fs::write(&guard.lock_path, b"invalid or stale metadata").unwrap();
         guard.acquire(false).unwrap();
+    }
+
+    #[test]
+    fn simultaneous_callers_have_exactly_one_owner() {
+        let tmp = tempfile::tempdir().unwrap();
+        let barrier = std::sync::Barrier::new(8);
+        let outcomes = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        let mut guard = DuplicateGuard::new(tmp.path(), "op");
+                        barrier.wait();
+                        let result = guard.acquire(false);
+                        barrier.wait(); // Keep the winner alive until all have attempted.
+                        result
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(outcomes.iter().filter(|r| r.is_ok()).count(), 1);
+        assert!(
+            outcomes
+                .iter()
+                .filter_map(|r| r.as_ref().err())
+                .all(|e| e.error_code() == "operation_busy")
+        );
+    }
+
+    #[test]
+    fn different_resources_do_not_block_each_other() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut a = DuplicateGuard::new(tmp.path(), "a");
+        let mut b = DuplicateGuard::new(tmp.path(), "b");
+        a.acquire(false).unwrap();
+        b.acquire(false).unwrap();
     }
 }

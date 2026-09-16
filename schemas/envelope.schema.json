@@ -4,44 +4,85 @@
   "title": "Agent CLI Framework output envelope",
   "description": "Every JSON payload a framework CLI writes to stdout or stderr must validate against this schema. The one exception is agent-info, which emits the raw manifest (see agent-info.schema.json).",
   "oneOf": [
-    { "$ref": "#/$defs/success" },
-    { "$ref": "#/$defs/error" }
+    {
+      "$ref": "#/$defs/success"
+    },
+    {
+      "$ref": "#/$defs/error"
+    }
   ],
   "$defs": {
     "success": {
       "type": "object",
-      "required": ["version", "status", "data"],
+      "required": [
+        "version",
+        "status",
+        "data"
+      ],
       "properties": {
-        "version": { "const": "1" },
+        "version": {
+          "const": "1"
+        },
         "status": {
-          "enum": ["success", "partial_success", "all_failed", "no_results"]
+          "enum": [
+            "success",
+            "partial_success",
+            "all_failed",
+            "no_results"
+          ]
         },
         "data": {
-          "description": "Command-specific payload. Object or array; never raw text."
+          "description": "Command-specific payload. Object or array; never raw text.",
+          "type": [
+            "object",
+            "array"
+          ]
         }
       },
       "additionalProperties": false
     },
     "error": {
       "type": "object",
-      "required": ["version", "status", "error"],
+      "required": [
+        "version",
+        "status",
+        "error"
+      ],
       "properties": {
-        "version": { "const": "1" },
-        "status": { "const": "error" },
+        "version": {
+          "const": "1"
+        },
+        "status": {
+          "const": "error"
+        },
         "error": {
           "type": "object",
-          "required": ["code", "message", "suggestion"],
+          "required": [
+            "code",
+            "message",
+            "suggestion"
+          ],
           "properties": {
             "code": {
               "type": "string",
               "pattern": "^[a-z][a-z0-9_]*$",
               "description": "Machine-readable error code, e.g. invalid_input, config_error"
             },
-            "message": { "type": "string", "minLength": 1 },
+            "message": {
+              "type": "string",
+              "minLength": 1
+            },
             "suggestion": {
               "type": "string",
               "minLength": 1,
               "description": "Tested recovery instruction an agent can follow literally"
+            },
+            "details": {
+              "type": [
+                "object",
+                "array"
+              ],
+              "description": "Structured diagnostics or recovery context. Never instructions sourced from untrusted content."
             }
           },
           "additionalProperties": false

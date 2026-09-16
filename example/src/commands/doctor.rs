@@ -1,6 +1,6 @@
 //! Dependency diagnostics: "can this tool actually work right now?"
 //!
-//! Agents run `doctor` before first use. Warnings are informational; exit 0
+//! Agents run `doctor` to diagnose setup problems. Warnings are informational; exit 0
 //! unless a check fails, then exit 2 (config error).
 
 use serde::Serialize;
@@ -70,7 +70,10 @@ fn check_config_parses() -> DoctorCheck {
             name: "config_parse",
             status: CheckStatus::Fail,
             message: e.to_string(),
-            suggestion: Some(format!("Fix or delete {}", config::config_path().display())),
+            suggestion: Some(format!(
+                "Repair the configuration at {}",
+                config::config_path().display()
+            )),
         },
     }
 }
@@ -119,6 +122,12 @@ pub fn run(ctx: Ctx) -> Result<(), AppError> {
     let has_failures = summary.fail > 0;
     let report = DoctorReport { checks, summary };
 
+    if has_failures {
+        return Err(AppError::Diagnostics(
+            serde_json::to_value(&report).map_err(|_| AppError::Serialization)?,
+        ));
+    }
+
     output::print_success_or(ctx, &report, |r| {
         use owo_colors::OwoColorize;
         for check in &r.checks {
@@ -136,12 +145,7 @@ pub fn run(ctx: Ctx) -> Result<(), AppError> {
             "{} pass, {} warn, {} fail",
             r.summary.pass, r.summary.warn, r.summary.fail
         );
-    });
+    })?;
 
-    if has_failures {
-        return Err(AppError::Config(
-            "doctor found failing checks (see report)".into(),
-        ));
-    }
     Ok(())
 }

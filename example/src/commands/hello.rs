@@ -36,7 +36,7 @@ pub fn run(ctx: Ctx, name: String, style: Style) -> Result<(), AppError> {
     output::print_success_or(ctx, &greeting, |g| {
         use owo_colors::OwoColorize;
         println!("{}", g.message.green());
-    });
+    })?;
 
     Ok(())
 }

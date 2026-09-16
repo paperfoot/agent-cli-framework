@@ -1,274 +1,199 @@
-# Agent CLI Framework -- Build Instructions for AI Agents
+# Build instructions
 
-You are building a Rust CLI that AI agents can discover, call, and learn from. Follow these rules exactly. Do not deviate, add features, or invent patterns not described here.
+Build a CLI an agent can discover and use through its executable. **Rust is
+preferred, not required.** Choose the language that fits the product and meets
+its measured speed, CPU, memory, and distribution needs. Preserve an existing
+stack when it meets those needs. Implement only the patterns the product uses.
 
-## Spirit
+This file is the build specification. JSON shapes are defined in `schemas/`.
+The example is executable reference code. A disagreement is a bug to fix in all
+three, not a reason to invent another convention.
 
-This framework builds tools that are self-explanatory, hyper-efficient, powerful, fast, and local. The binary IS the interface -- no MCP servers, no protocol layers, no external documentation. An agent that has your CLI on PATH has everything it needs.
+## Read in this order
+
+1. This file.
+2. The relevant modules in the Rust reference, `example/src/`, and their tests.
+   Copy them for Rust; implement equivalent behavior in another language.
+3. Only the reference your task needs:
+   - [Runtime contracts](docs/contracts.md): discovery, output, errors, compatibility.
+   - [Command design](docs/command-design.md): bounded reads, writes, batches, jobs.
+   - [Implementation](docs/implementation.md): config, secrets, concurrency, HTTP.
+   - [Update standard](docs/update-standard.md): distribution and releases.
+   - [Evaluation](docs/evaluation.md): measurements and agent task trials.
+   - [Performance](docs/performance.md): language choice and resource budgets.
+
+Do not load every reference up front. Do not add model names, provider-specific
+prompt tricks, a server, or a protocol layer to the core.
+
+## Required contracts
+
+1. **Stdout is data.** Piped/redirected output is one compact JSON document.
+   A terminal gets readable output. Global `--json` forces JSON; global `--quiet`
+   suppresses human informational output, never JSON or errors.
+2. **Help and version succeed.** Own the parser's result. Pre-scan `--json` up to
+   the `--` delimiter. Wrap help/version in a success envelope when piped; exit 0.
+   Parse errors go through the framework and exit 3. In Rust, use
+   `Cli::try_parse()`; never let a parser choose an incompatible error exit code.
+3. **Failures go to stderr.** Return one error envelope, a nonzero code, and no
+   success envelope. Serialize before writing. Diagnostic reports on failure
+   belong in `error.details`. No raw logs in JSON mode.
+4. **Exit codes are fixed.** `0` success; `1` runtime/transient; `2` config/auth;
+   `3` invalid input/conflict; `4` rate limited. Exit 1 is not permission to replay
+   a write. Recovery depends on the operation and whether its outcome is known.
+5. **Discovery matches execution.** `agent-info` (alias `info`) emits the raw
+   canonical manifest. `commands` is an object; every entry has `description`,
+   `args`, `options`. Aliases are arrays; global flags live in `global_flags`;
+   config metadata lives in `config`. Generate syntax from the command parser.
+   Test defaults, enums, aliases, examples, and command coverage in both directions.
+6. **Discovery is scoped and local.** `agent-info --command "resource action"`
+   returns the same manifest with only that command; a group selects descendants.
+   Unknown paths fail with exit 3. Help, discovery, `config path`, and pure commands
+   work offline with absent or malformed config. Do not run doctor automatically.
+7. **No implicit interaction.** No prompts, pagers, stdin reads, or automatic
+   upgrades. Destructive commands require `--confirm`. `--force` only bypasses
+   the documented duplicate guard; it never substitutes for confirmation.
+8. **Secrets stay secret.** Resolve explicit value → environment → config, first
+   non-empty wins. Mask displays. Do not include credentials, raw auth headers,
+   or secret-bearing provider/config errors in logs, state, or suggestions.
+9. **Recovery is executable.** Every error supplies an exit code, stable error code,
+   and recovery suggestion (methods in the Rust reference). Suggestions must be
+   correct, actionable, and tested. Never
+   suggest changing installation channel or blindly repeating an uncertain write.
+10. **Completion is observable.** Return stable IDs, resulting state, and artifact
+    paths when relevant. Accepted/queued means accepted/queued, not completed.
+
+Success (stdout):
+
+```json
+{"version":"1","status":"success","data":{}}
+```
+
+Failure (stderr):
+
+```json
+{"version":"1","status":"error","error":{"code":"invalid_input","message":"Name cannot be empty","suggestion":"Provide a non-empty name"}}
+```
+
+`agent-info` is the raw-JSON exception. Data is an object or array. Keep envelope
+version `1` for compatible additions; document migrations for breaking changes.
 
 ## Architecture
 
-Split your CLI into focused modules. Never write a monolithic main.rs.
+Keep parsing, configuration, errors, output, and domain logic separate in any
+language. The Rust reference uses this layout; filenames and libraries are not
+requirements for other implementations.
 
-```
+```text
 src/
-  main.rs         # Entry point only: parse, detect format, dispatch, exit
-  cli.rs          # Clap derive: Cli struct + Commands enum + help footer
-  config.rs       # AppConfig + load() via figment (3-tier precedence)
-  error.rs        # Error enum with exit_code(), error_code(), suggestion()
-  output.rs       # Format enum, Ctx struct, print_success_or(), print_error()
-  guard.rs        # Duplicate guard (when any command is expensive/irreversible)
+  main.rs             parse, detect format, dispatch, exit
+  cli.rs              Clap derives and contextual help
+  config.rs           AppConfig and lazy figment loading
+  error.rs            AppError and recovery instructions
+  output.rs           Format, Ctx, fallible output helpers
+  guard.rs            required for expensive/irreversible work
   commands/
-    mod.rs        # Re-exports
-    <command>.rs  # One file per domain command
-    agent_info.rs # Capability manifest with arg schemas (always present)
-    skill.rs      # Skill install + status (always present)
-    config.rs     # config show/path (always present)
-    doctor.rs     # Dependency diagnostics (required when the CLI has external deps)
-    update.rs     # Distribution-aware update (required when distributed)
-tests/            # Integration tests verifying contracts (crate root, not src/)
-Cargo.toml
+    mod.rs
+    <domain>.rs       one module per domain
+    agent_info.rs     discovery derived from command grammar
+    skill.rs          embedded skill install/status
+    config.rs         show/path
+    doctor.rs         required for external dependencies
+    update.rs         required for distribution
+tests/                integration contracts, outside src/
 ```
 
-## Non-Negotiable Rules
+In Rust, `main.rs` stays small. Pass `Ctx { format, quiet }` to commands. Commands return
+`Result<(), AppError>` and propagate output errors. Load config only inside
+commands that need it. Add only dependencies the product uses. For Rust, copy the
+locked example crate rather than guessing versions. Other languages use their
+native parser, serializer, configuration, and error-handling equivalents.
 
-1. **Every stdout path respects output format.** JSON when piped, colored human-readable output in terminal. No exceptions. No raw text leaks.
-2. **`--help` and `--version` exit 0.** They are not errors. Wrap in success envelope when piped.
-3. **Errors go to stderr.** Both JSON and human-readable. `tool cmd | jq` must never break on error text.
-4. **Exit codes are: 0=success, 1=retry, 2=config, 3=input, 4=rate-limited.** Nothing else.
-5. **`agent-info` matches reality.** Every command listed works. Every flag described exists. This is a tested contract.
-6. **Suggestions are tested instructions.** An agent follows them literally. Wrong suggestions are P0 bugs.
-7. **No interactive prompts.** No stdin reads. No pagers. Destructive ops take `--confirm` flag.
-8. **Secrets are never displayed in plain text.** Mask with `mask_secret()`. Never include in error messages.
+- `clap` derives for parsing; `serde` / `serde_json` for data; `thiserror` for errors.
+- `figment` merges defaults → TOML → prefixed environment variables.
+- `directories` resolves platform paths. `config path` is authoritative; macOS
+  uses platform-native paths, Linux uses XDG. Never hardcode Linux paths on macOS.
+- Use the release profile in `example/Cargo.toml`. CI builds release artifacts.
 
-## Output Format
+## Performance is part of correctness
 
-Detect automatically. Bundle format + quiet into an output context:
+Set workload-specific budgets for startup, CPU time, peak memory, output bytes,
+and external calls. Measure release/production builds against unchanged tasks.
+Keep help and discovery local. Load runtimes, SDKs, and clients only on the paths
+that need them. Avoid idle daemons, process-per-item work, busy polling, unbounded
+concurrency, and loading whole datasets to return a small page.
 
-```rust
-pub enum Format { Json, Human }
+Bound input, result size, workers, retries, and total time. Reuse connections
+within a command. Stream large artifacts to files through an explicit bounded
+contract. A faster failure or truncated answer is not an optimization. See
+[performance](docs/performance.md) for profiling and language tradeoffs.
 
-impl Format {
-    pub fn detect(json_flag: bool) -> Self {
-        if json_flag || !std::io::stdout().is_terminal() { Format::Json }
-        else { Format::Human }
-    }
-}
+## Commands and help
 
-pub struct Ctx { pub format: Format, pub quiet: bool }
+Always provide `agent-info` / `info`, `skill install`, `skill status`,
+`config show`, and `config path`. Add `doctor` when external binaries, endpoints,
+or credentials are required: structured pass/warn/fail checks, exit 0 with no
+failures, exit 2 otherwise. Warnings are allowed.
 
-impl Ctx {
-    pub fn new(json_flag: bool, quiet: bool) -> Self {
-        Self { format: Format::detect(json_flag), quiet }
-    }
-}
-```
+Alias CRUD verbs consistently: `list` / `ls`, `create` / `new`, `delete` / `rm`,
+`show` / `get` (`visible_alias` in Clap). Use parser-enforced closed vocabularies
+(`ValueEnum` in Rust). Root `--help` has 3–8 concise Tips and real Examples
+(`after_long_help` in Clap).
+Describe useful tasks, defaults, effects, and the result; avoid redundant prose.
 
-Pass `Ctx` to all commands. `--quiet` suppresses human output; JSON always emits.
+Keep the installed skill a short signpost: when to use the CLI, one useful
+example, and how to inspect one command. Preserve the example's platform targets.
+Do not dump the full manifest into every skill or tell agents to rediscover it
+before each call.
 
-Success envelope (stdout):
-```json
-{"version": "1", "status": "success", "data": { ... }}
-```
+## Optional patterns: implement only when relevant
 
-Error envelope (stderr):
-```json
-{"version": "1", "status": "error", "error": {"code": "...", "message": "...", "suggestion": "..."}}
-```
+- Collections: bounded `--limit`, opaque `--cursor`, explicit truncation and
+  continuation; `--fields` for wide records. Filter before returning data.
+- Writes: deterministic validation, `--dry-run` where meaningful, stable resource
+  IDs, explicit effects. Preview is a capability, not a mandatory extra call on
+  every authorized action.
+- Retriable writes: provider-backed idempotency keys and reconciliation after
+  uncertain outcomes. Local duplicate locks cannot guarantee exactly-once work.
+- Batches: bounded input and concurrency, per-item outcomes and IDs; no hidden
+  replay of successful items.
+- Long jobs: durable IDs, status/result/cancel and bounded waits; never rerun the
+  start operation just because the agent's shell call timed out.
 
-Extended status values for multi-source operations: `success`, `partial_success`, `all_failed`, `no_results`.
+[Command design](docs/command-design.md) defines these contracts. The greeter does
+not implement these domain-specific flags; do not advertise them until yours do.
 
-## Error Pattern
+## Concurrent work and updates
 
-Every error enum implements three methods -- the contract that connects errors to exit codes and JSON envelopes:
+Use an OS-backed nonblocking lock scoped to the resource/operation. The reference
+uses `flock` on macOS/Linux. Only the owner releases its handle; keep the lock file
+in place to avoid inode races. The kernel releases locks on process death. A PID
+or a one-hour timestamp alone is not a safe ownership test. `--force` bypasses the
+guard without touching another owner's lock. See [implementation notes](docs/implementation.md).
 
-```rust
-impl AppError {
-    pub fn exit_code(&self) -> i32;    // 1=transient, 2=config, 3=input, 4=rate-limited
-    pub fn error_code(&self) -> &str;  // "invalid_input", "config_error", etc.
-    pub fn suggestion(&self) -> &str;  // Tested recovery instruction (agents follow literally)
-}
-```
+`update --check` performs no filesystem or package-manager mutation and exits 0
+when the check completes, including when a newer release exists. `update` respects
+the owning installation channel. Unknown sources return `instructions_only`.
+Standalone replacement requires exact asset selection, HTTPS, checksum verification,
+staging, version validation, and atomic replacement. The example deliberately
+returns instructions for standalone installs until that verified updater exists.
+Follow the [update standard](docs/update-standard.md), including its JSON fields.
 
-Standard categories: `InvalidInput` (3), `Config` (2), `Transient`/`Io`/`Update` (1), `RateLimited` (4).
+## Before handing back
 
-## Entry Point Pattern
-
-Pre-scan `--json` before clap parses so it works on help/version/error paths. Never let clap own the exit code — always exit explicitly through the framework.
-
-```rust
-fn has_json_flag() -> bool {
-    std::env::args_os().any(|a| a == "--json")
-}
-
-fn main() {
-    let json_flag = has_json_flag();
-    let cli = match Cli::try_parse() {
-        Ok(cli) => cli,
-        Err(e) => {
-            if matches!(e.kind(),
-                clap::error::ErrorKind::DisplayHelp
-                | clap::error::ErrorKind::DisplayVersion
-            ) {
-                let format = Format::detect(json_flag);
-                match format {
-                    Format::Json => { print_help_json(e); std::process::exit(0); }
-                    Format::Human => e.exit(),
-                }
-            }
-            // Parse errors: we own the exit code, always 3
-            let format = Format::detect(json_flag);
-            print_clap_error(format, &e);
-            std::process::exit(3);
-        }
-    };
-    let ctx = Ctx::new(cli.json, cli.quiet);
-    // Load config lazily -- only inside commands that need it. agent-info,
-    // config path, skill, and pure domain commands must keep working even
-    // when config.toml is malformed.
-    if let Err(e) = run(cli, ctx) {
-        print_error(ctx.format, &e);
-        std::process::exit(e.exit_code());
-    }
-}
-```
-
-## Config Convention
-
-- Path: `~/.config/<app>/config.toml`
-- Load: defaults -> TOML file -> env vars (prefix `<APP>_`)
-- Use `figment` crate for merging
-- Use `directories` crate for platform paths
-
-## Secret Convention
-
-- Resolution: flag value -> env var -> config file (first non-empty wins)
-- Display: always masked (`sk-pr...1234`)
-- Never store in state databases, never log plain text
-
-## Directory Convention
-
-| Purpose | Path | Deletable? |
-|---------|------|-----------|
-| Config | `~/.config/<app>/` | No (user settings) |
-| State | `~/.local/share/<app>/` | Careful (operational data) |
-| Cache | `~/.cache/<app>/` | Always safe |
-
-## Command Naming
-
-Always alias CRUD subcommands: `list`/`ls`, `create`/`new`, `delete`/`rm`, `show`/`get`. Use `#[command(visible_alias = "ls")]`. Be consistent across all subcommand groups.
-
-## Standard Commands
-
-Every CLI has these built-in commands:
-- `agent-info` (alias `info`) -- capability manifest, raw JSON, not wrapped in envelope
-- `skill install` -- write SKILL.md to `~/.claude/skills/<name>/`, `~/.codex/skills/<name>/`, `~/.gemini/skills/<name>/`
-- `skill status` -- check installation status
-
-Standard:
-- `config show` -- display effective merged config (secrets masked)
-- `config path` -- print config file path
-
-Required when applicable:
-- `doctor` -- required when the CLI has external dependencies (API keys, binaries, endpoints). Returns structured pass/warn/fail checks. Exit 0 when no check fails (warnings allowed), exit 2 when any check fails.
-- `update [--check]` -- required when the CLI is distributed; distribution-aware update check/apply
-
-The `agent-info` manifest uses ONE canonical shape (defined by the `example/`
-binary): `commands` is an object of command objects with `description`,
-`args`, and `options` schemas; aliases go in an `aliases` array; global flags
-under `global_flags`; config metadata nests under `config` with `path` and
-`env_prefix`. Do not invent alternative shapes.
-
-## Rich Help
-
-`--help` output should include a Tips section and an Examples section after the standard clap output, using `after_long_help` in clap. Tips are contextual guidance (3-8 bullets). Examples are real commands agents can copy. This is especially valuable for agents that read `--help` to bootstrap usage.
-
-## Global Flags
-
-Always at the top-level `Cli` struct:
-- `--json` -- force JSON output even in terminal (required, always present)
-- `--quiet` -- suppress informational human output; JSON always emits (required, always present)
-
-## Dependencies
-
-```toml
-clap = { version = "4", features = ["derive", "env"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "2"
-comfy-table = "7"
-owo-colors = "4"
-directories = "6"
-figment = { version = "0.10", features = ["toml", "env"] }
-which = "8"     # doctor: binary-on-PATH checks
-chrono = "0.4"  # duplicate guard: lock timestamps
-libc = "0.2"    # duplicate guard: PID liveness
-
-[profile.release]
-lto = true
-codegen-units = 1
-strip = true
-opt-level = 3
-```
-
-## Duplicate Guard
-
-For commands that do expensive or irreversible work (API calls, long computations, deployments), prevent accidental duplicate runs. Use a lock file in the state directory. The pattern:
-
-1. Before starting: check for `~/.local/share/<app>/locks/<operation>.lock`
-2. If lock exists, its PID is alive, and it is fresh (< 1 hour): exit 3 with suggestion "Operation already running. Use --force to override."
-3. If the lock's PID is dead, the lock is stale (> 1 hour), or the timestamp is unparseable: overwrite and continue
-4. Create lock file with PID + timestamp
-5. Remove lock on completion (success or failure) -- use a Drop impl so early returns and panics still clean up
-6. `--force` flag bypasses the guard
-
-Lock file format: `{"pid": 12345, "started_at": "2026-04-12T10:00:00Z", "operation": "deploy"}`
-
-## Update Standard
-
-The update rule is one command, distribution-aware update paths.
-
-`update --check` is always safe: no filesystem mutation, no package-manager
-upgrade, no shell profile changes, no raw stdout leaks, and exit 0 when the
-check completes even if a new version exists.
-
-`update` must respect the channel that owns the installed binary:
-
-- Standalone installer binary: may self-replace from GitHub Releases after exact
-  platform asset selection, HTTPS download, SHA256 verification, optional
-  attestation/signature verification, temp-file staging, `<new-binary> --version`
-  validation, and atomic replacement.
-- Homebrew install: do not self-replace; use or return `brew upgrade <formula>`.
-- Cargo install: do not self-replace; use or return `cargo install --locked --force <crate>` or `cargo binstall --no-confirm <crate>` when supported.
-- npm, Bun package-manager, uv tool, pipx, winget, scoop, apt, and enterprise-managed installs:
-  defer to the owning package manager or internal rollout process.
-- Unknown install source: return `update_mode = "instructions_only"` instead of
-  blindly replacing the current executable.
-
-`update --check --json` must return a success envelope with
-`current_version`, `latest_version`, `status`, `install_source`, `update_mode`,
-`upgrade_command`, `release_url`, and `requires_skill_reinstall`.
-
-Release artifacts should be built in CI, not on a developer laptop. For Rust
-CLIs, prefer cargo-dist or an equivalent release pipeline that produces GitHub
-Release archives, checksums, Homebrew formulae, cargo-binstall-compatible
-artifacts, and optional GitHub artifact attestations. See
-`docs/update-standard.md` for the full policy and required tests.
-
-## Conformance
-
-Your built binary MUST pass the framework conformance probe before you ship:
+For Rust, run from `example/` (substitute your binary and framework path):
 
 ```bash
-<path-to-this-repo>/conformance/conformance.sh ./target/release/<your-cli>
+cargo fmt --check
+cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo test --locked
+cargo build --release --locked
+../conformance/conformance.sh ./target/release/greeter
 ```
 
-It checks the agent-info manifest shape, command routability, help/version
-behavior, stderr discipline, and the exit-code contract. The JSON Schemas in
-`schemas/` (envelope.schema.json, agent-info.schema.json) are the precise
-shape definitions -- validate against them when in doubt. Wire the script
-into your CI the way this repo's `.github/workflows/ci.yml` does.
-
-## Reference
-
-See the `example/` directory in this repo for a working implementation of all eight patterns, including the entry point, error type, output helpers, guard, and doctor. Everything marked `REPLACE` in the example source is placeholder content -- replace it, keep the structure and contracts. Secret handling, XDG paths, and HTTP retry are documented as code patterns in the README's Reusable Modules section.
+Other languages run their native formatter, static checks, tests, production
+build/package step, and the same language-neutral conformance probe. Run the full
+schema validator as described in [CONTRIBUTING.md](CONTRIBUTING.md).
+Tests use isolated home/config/state directories and controlled provider fixtures.
+Never trigger real writes merely to check routing. Verify normal use, bad input,
+malformed config, and relevant retries/concurrency. Test actual resulting state.
+Report what changed, which checks passed, and any unimplemented domain features.

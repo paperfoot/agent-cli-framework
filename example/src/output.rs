@@ -1,17 +1,8 @@
-/// Output format detection and JSON envelope helpers.
-///
-/// - Terminal (TTY): colored human output
-/// - Piped/redirected: JSON envelope
-/// - `--json` flag: force JSON even in terminal
-/// - `--quiet` flag: suppress human informational output
-///
-/// All JSON serialization goes through safe_json_string() which never panics.
+//! Compact JSON for pipes; human output for terminals. Serialize before writing.
 use serde::Serialize;
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 
 use crate::error::AppError;
-
-// ── Format detection ────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy)]
 pub enum Format {
@@ -22,20 +13,12 @@ pub enum Format {
 impl Format {
     pub fn detect(json_flag: bool) -> Self {
         if json_flag || !std::io::stdout().is_terminal() {
-            Format::Json
+            Self::Json
         } else {
-            Format::Human
+            Self::Human
         }
     }
-
-    #[allow(dead_code)]
-    pub fn is_json(self) -> bool {
-        matches!(self, Format::Json)
-    }
 }
-
-// ── Output context ─────────────────────────────────────────────────────────
-// Bundles format + quiet so commands take one parameter instead of two.
 
 #[derive(Clone, Copy)]
 pub struct Ctx {
@@ -52,101 +35,117 @@ impl Ctx {
     }
 }
 
-// ── Safe JSON serialization ────────────────────────────────────────────────
-
-/// Serialize to pretty JSON. On failure, return a valid JSON error envelope
-/// built entirely from serde_json (no string interpolation, no panic risk).
-fn safe_json_string<T: Serialize>(value: &T) -> String {
-    match serde_json::to_string_pretty(value) {
-        Ok(s) => s,
-        Err(e) => {
-            let fallback = serde_json::json!({
-                "version": "1",
-                "status": "error",
-                "error": {
-                    "code": "serialize",
-                    "message": e.to_string(),
-                    "suggestion": "Retry the command",
-                },
-            });
-            serde_json::to_string_pretty(&fallback).unwrap_or_else(|_| {
-                r#"{"version":"1","status":"error","error":{"code":"serialize","message":"serialization failed","suggestion":"Retry the command"}}"#.to_string()
-            })
-        }
-    }
+fn write_json<T: Serialize>(mut writer: impl Write, value: &T) -> Result<(), AppError> {
+    let mut bytes = serde_json::to_vec(value).map_err(|_| AppError::Serialization)?;
+    bytes.push(b'\n');
+    writer.write_all(&bytes)?;
+    Ok(())
 }
 
-// ── Envelope helpers ────────────────────────────────────────────────────────
+pub fn print_json<T: Serialize>(value: &T) -> Result<(), AppError> {
+    write_json(std::io::stdout().lock(), value)
+}
 
-/// Print success envelope (JSON) or call the human closure.
-/// When quiet + human, the closure is skipped. JSON always emits.
-pub fn print_success_or<T: Serialize, F: FnOnce(&T)>(ctx: Ctx, data: &T, human: F) {
+pub fn print_success_or<T: Serialize, F: FnOnce(&T)>(
+    ctx: Ctx,
+    data: &T,
+    human: F,
+) -> Result<(), AppError> {
     match ctx.format {
         Format::Json => {
-            let envelope = serde_json::json!({
-                "version": "1",
-                "status": "success",
-                "data": data,
-            });
-            println!("{}", safe_json_string(&envelope));
+            // json! on a failing Serialize implementation would panic. Convert
+            // explicitly so no success bytes escape before serialization succeeds.
+            let data = serde_json::to_value(data).map_err(|_| AppError::Serialization)?;
+            print_json(&serde_json::json!({"version": "1", "status": "success", "data": data}))?;
         }
         Format::Human if !ctx.quiet => human(data),
-        Format::Human => {} // quiet: suppress human output
+        Format::Human => {}
     }
+    Ok(())
 }
 
-/// Print error to stderr in the appropriate format.
-/// Errors are never suppressed by --quiet.
 pub fn print_error(format: Format, err: &AppError) {
-    let envelope = serde_json::json!({
-        "version": "1",
-        "status": "error",
-        "error": {
-            "code": err.error_code(),
-            "message": err.to_string(),
-            "suggestion": err.suggestion(),
-        },
+    let mut error = serde_json::json!({
+        "code": err.error_code(), "message": err.to_string(), "suggestion": err.suggestion(),
     });
-    match format {
-        Format::Json => eprintln!("{}", safe_json_string(&envelope)),
-        Format::Human => {
-            use owo_colors::OwoColorize;
-            eprintln!("{} {}", "error:".red().bold(), err);
-            eprintln!("  {}", err.suggestion().dimmed());
-        }
+    if let Some(details) = err.details() {
+        error["details"] = details.clone();
     }
-}
-
-/// Wrap --help / --version output in a success JSON envelope.
-pub fn print_help_json(err: clap::Error) {
-    let envelope = serde_json::json!({
-        "version": "1",
-        "status": "success",
-        "data": { "usage": err.to_string().trim_end() },
-    });
-    println!("{}", safe_json_string(&envelope));
-}
-
-/// Wrap a clap parse error appropriately. In JSON mode, emit a structured
-/// error envelope to stderr. In human mode, print the error and suggestion
-/// WITHOUT calling err.exit() — we own the exit code, not clap.
-pub fn print_clap_error(format: Format, err: &clap::Error) {
     match format {
         Format::Json => {
-            let envelope = serde_json::json!({
-                "version": "1",
-                "status": "error",
-                "error": {
-                    "code": "invalid_input",
-                    "message": err.to_string(),
-                    "suggestion": format!("Check arguments with: {} --help", env!("CARGO_PKG_NAME")),
-                },
-            });
-            eprintln!("{}", safe_json_string(&envelope));
+            // If stderr itself is closed, there is nowhere else safe to report.
+            let _ = write_json(
+                std::io::stderr().lock(),
+                &serde_json::json!({
+                    "version": "1", "status": "error", "error": error,
+                }),
+            );
         }
         Format::Human => {
-            // Render clap's error message to stderr without letting clap exit.
-            eprint!("{err}");
+            use owo_colors::OwoColorize;
+            let mut stderr = std::io::stderr().lock();
+            let _ = writeln!(
+                stderr,
+                "{} {}\n  {}",
+                "error:".red().bold(),
+                err,
+                err.suggestion()
+            );
+            if let Some(details) = err.details() {
+                let _ = writeln!(stderr, "{details:#}");
+            }
         }
+    }
+}
+
+pub fn print_help_json(err: clap::Error) -> Result<(), AppError> {
+    print_json(&serde_json::json!({
+        "version": "1", "status": "success", "data": {"usage": err.to_string().trim_end()},
+    }))
+}
+
+pub fn print_clap_error(format: Format, err: &clap::Error) {
+    print_error(format, &AppError::InvalidInput(err.to_string()));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct CannotSerialize;
+    impl Serialize for CannotSerialize {
+        fn serialize<S: serde::Serializer>(&self, _: S) -> Result<S::Ok, S::Error> {
+            Err(serde::ser::Error::custom("do not expose internal data"))
+        }
+    }
+
+    #[test]
+    fn failed_serialization_writes_nothing_and_returns_framework_error() {
+        let mut bytes = Vec::new();
+        let error = write_json(&mut bytes, &CannotSerialize).unwrap_err();
+        assert!(bytes.is_empty());
+        assert_eq!(error.exit_code(), 1);
+        assert_eq!(error.error_code(), "serialization_error");
+        let error = print_success_or(Ctx::new(true, false), &CannotSerialize, |_| {}).unwrap_err();
+        assert_eq!(error.error_code(), "serialization_error");
+    }
+
+    #[test]
+    fn closed_output_is_an_error_without_a_panic() {
+        struct Closed;
+        impl Write for Closed {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::ErrorKind::BrokenPipe.into())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        assert_eq!(
+            write_json(Closed, &serde_json::json!({}))
+                .unwrap_err()
+                .exit_code(),
+            1
+        );
     }
 }

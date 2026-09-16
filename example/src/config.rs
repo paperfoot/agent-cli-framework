@@ -9,11 +9,8 @@ use crate::error::AppError;
 
 // ── Config structs ─────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppConfig {
-    /// Default greeting style
-    pub style: String,
-
     /// Update settings
     pub update: UpdateConfig,
 }
@@ -44,15 +41,6 @@ pub struct UpdateConfig {
     pub tap: String,
 }
 
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            style: "friendly".into(),
-            update: UpdateConfig::default(),
-        }
-    }
-}
-
 impl Default for UpdateConfig {
     fn default() -> Self {
         Self {
@@ -78,6 +66,7 @@ pub fn config_path() -> PathBuf {
 }
 
 /// State directory (lock files, operational data). Deletable with care.
+#[allow(dead_code)] // Used when a domain command needs the duplicate guard.
 pub fn data_dir() -> PathBuf {
     directories::ProjectDirs::from("", "", env!("CARGO_PKG_NAME"))
         .map(|d| d.data_dir().to_path_buf())
@@ -90,11 +79,16 @@ pub fn load() -> Result<AppConfig, AppError> {
     use figment::Figment;
     use figment::providers::{Env, Format as _, Serialized, Toml};
 
-    let prefix = format!("{}_", env!("CARGO_PKG_NAME").to_uppercase());
+    let prefix = format!(
+        "{}_",
+        env!("CARGO_PKG_NAME").to_uppercase().replace('-', "_")
+    );
 
     Figment::from(Serialized::defaults(AppConfig::default()))
         .merge(Toml::file(config_path()))
-        .merge(Env::prefixed(&prefix).split("_"))
+        // Double underscores separate nesting; single underscores belong to
+        // field names, e.g. GREETER_UPDATE__INSTALL_SOURCE.
+        .merge(Env::prefixed(&prefix).split("__"))
         .extract()
         .map_err(|e| AppError::Config(e.to_string()))
 }

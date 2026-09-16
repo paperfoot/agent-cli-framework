@@ -16,14 +16,14 @@ fn skill_content() -> String {
         r#"---
 name: {name}
 description: >
-  Greet people in different styles. Run `{name} agent-info` for full
-  capabilities, flags, and exit codes.
+  Greet people in different styles. Use `{name} agent-info --command hello` to inspect greeting options.
 ---
 
 ## {name}
 
-A demo CLI. Run `{name} agent-info` for the machine-readable capability
-manifest. Run `{name} hello <name> --style pirate` to use it.
+Run `{name} hello Ada --style pirate`. For another command, inspect it with
+`{name} agent-info --command "config show"`. Use `{name} --help` as the index;
+`{name} agent-info` returns everything. Reuse discovery for the installed version.
 "#
     )
 }
@@ -106,7 +106,7 @@ pub fn install(ctx: Ctx) -> Result<(), AppError> {
                 item.path.dimmed()
             );
         }
-    });
+    })?;
 
     Ok(())
 }
@@ -159,7 +159,7 @@ pub fn status(ctx: Ctx) -> Result<(), AppError> {
             ]);
         }
         println!("{table}");
-    });
+    })?;
 
     Ok(())
 }

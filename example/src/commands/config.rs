@@ -9,7 +9,7 @@ use crate::output::{self, Ctx};
 pub fn show(ctx: Ctx, config: &AppConfig) -> Result<(), AppError> {
     output::print_success_or(ctx, config, |c| {
         println!("{}", serde_json::to_string_pretty(c).unwrap());
-    });
+    })?;
     Ok(())
 }
 
@@ -33,6 +33,6 @@ pub fn path(ctx: Ctx) -> Result<(), AppError> {
             use owo_colors::OwoColorize;
             println!("  {}", "(file does not exist, using defaults)".dimmed());
         }
-    });
+    })?;
     Ok(())
 }

@@ -6,6 +6,15 @@
 #[derive(thiserror::Error, Debug)]
 #[allow(dead_code)] // Some variants demonstrate the full exit code contract (0-4)
 pub enum AppError {
+    #[error("Could not serialize command output")]
+    Serialization,
+
+    #[error("doctor found failing checks")]
+    Diagnostics(serde_json::Value),
+
+    #[error("Operation already running")]
+    OperationBusy,
+
     #[error("Invalid input: {0}")]
     InvalidInput(String),
 
@@ -26,17 +35,27 @@ pub enum AppError {
 }
 
 impl AppError {
+    pub fn details(&self) -> Option<&serde_json::Value> {
+        match self {
+            Self::Diagnostics(report) => Some(report),
+            _ => None,
+        }
+    }
+
     pub fn exit_code(&self) -> i32 {
         match self {
-            Self::InvalidInput(_) => 3,
-            Self::Config(_) => 2,
+            Self::InvalidInput(_) | Self::OperationBusy => 3,
+            Self::Config(_) | Self::Diagnostics(_) => 2,
             Self::RateLimited(_) => 4,
-            Self::Transient(_) | Self::Io(_) | Self::Update(_) => 1,
+            Self::Transient(_) | Self::Io(_) | Self::Update(_) | Self::Serialization => 1,
         }
     }
 
     pub fn error_code(&self) -> &str {
         match self {
+            Self::Serialization => "serialization_error",
+            Self::Diagnostics(_) => "config_error",
+            Self::OperationBusy => "operation_busy",
             Self::InvalidInput(_) => "invalid_input",
             Self::Config(_) => "config_error",
             Self::Transient(_) => "transient_error",
@@ -48,6 +67,13 @@ impl AppError {
 
     pub fn suggestion(&self) -> &str {
         match self {
+            Self::Serialization => {
+                "Report this output serialization failure to the tool maintainer"
+            }
+            Self::Diagnostics(_) => {
+                "Fix the failed checks listed in error.details, then run doctor again"
+            }
+            Self::OperationBusy => "Operation already running. Use --force to override.",
             Self::InvalidInput(_) => {
                 concat!("Check arguments with: ", env!("CARGO_PKG_NAME"), " --help")
             }
@@ -56,11 +82,16 @@ impl AppError {
                 env!("CARGO_PKG_NAME"),
                 " config path"
             ),
-            Self::Transient(_) | Self::Io(_) => "Retry the command",
-            Self::RateLimited(_) => "Wait a moment and retry",
+            Self::Transient(_) | Self::Io(_) => {
+                "Inspect the operation result before retrying; a failed response does not prove a write failed"
+            }
+            Self::RateLimited(_) => {
+                "Respect the provider backoff; retry only when the operation is safe to repeat"
+            }
             Self::Update(_) => concat!(
-                "Retry later, or install manually via cargo install ",
-                env!("CARGO_PKG_NAME")
+                "Inspect the installed version and update instructions with: ",
+                env!("CARGO_PKG_NAME"),
+                " update --check"
             ),
         }
     }

@@ -4,10 +4,10 @@ use clap::{Parser, Subcommand, ValueEnum};
 // bootstrap usage; keep 3-8 tips and 3-5 real, copy-pasteable examples.
 const HELP_FOOTER: &str = "\
 Tips:
-  • Run `greeter agent-info | jq` for the full machine-readable manifest
-  • Piped output is always a JSON envelope: `greeter hello Ada | jq '.data'`
-  • Run `greeter doctor` before first use to verify dependencies
-  • Config precedence: defaults < ~/.config/greeter/config.toml < GREETER_* env vars
+  • Run `greeter agent-info --command hello` for one command; omit --command for all
+  • Piped results use JSON envelopes; agent-info is raw JSON
+  • Run `greeter doctor` to diagnose setup failures
+  • Find platform config with `greeter config path`; defaults < file < GREETER_*
   • --quiet suppresses human output; JSON always emits
 
 Examples:
@@ -71,7 +71,11 @@ pub enum Commands {
     },
     /// Machine-readable capability manifest
     #[command(visible_alias = "info")]
-    AgentInfo,
+    AgentInfo {
+        /// Inspect a canonical command or group, e.g. "hello" or "config show"
+        #[arg(long, value_name = "PATH")]
+        command: Option<String>,
+    },
     /// Manage skill file installation
     Skill {
         #[command(subcommand)]
@@ -89,7 +93,7 @@ pub enum Commands {
         /// Check only, don't install
         #[arg(long)]
         check: bool,
-        /// Bypass the duplicate-run guard
+        /// Bypass duplicate guard (no effect for instructions-only updates)
         #[arg(long)]
         force: bool,
     },

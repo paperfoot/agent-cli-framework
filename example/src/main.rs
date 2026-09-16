@@ -11,7 +11,7 @@
 //!   - `update` for distribution-aware update checks
 //!   - Rich help: Tips + Examples via `after_long_help`
 //!   - `doctor` for structured dependency diagnostics
-//!   - Duplicate guard on the update apply path
+//!   - Tested duplicate guard primitive for expensive operations
 
 mod cli;
 mod commands;
@@ -29,7 +29,9 @@ use output::{Ctx, Format};
 /// honored even on help, version, and parse-error paths where clap hasn't
 /// populated the Cli struct yet.
 fn has_json_flag() -> bool {
-    std::env::args_os().any(|a| a == "--json")
+    std::env::args_os()
+        .take_while(|a| a != "--")
+        .any(|a| a == "--json")
 }
 
 fn main() {
@@ -48,7 +50,10 @@ fn main() {
                 let format = Format::detect(json_flag);
                 match format {
                     Format::Json => {
-                        output::print_help_json(e);
+                        if let Err(err) = output::print_help_json(e) {
+                            output::print_error(format, &err);
+                            std::process::exit(err.exit_code());
+                        }
                         std::process::exit(0);
                     }
                     Format::Human => e.exit(), // clap prints coloured help, exits 0
@@ -69,10 +74,7 @@ fn main() {
     // even when config.toml is malformed.
     let result = match cli.command {
         Commands::Hello { name, style } => commands::hello::run(ctx, name, style),
-        Commands::AgentInfo => {
-            commands::agent_info::run();
-            Ok(())
-        }
+        Commands::AgentInfo { command } => commands::agent_info::run(command.as_deref()),
         Commands::Skill { action } => match action {
             SkillAction::Install => commands::skill::install(ctx),
             SkillAction::Status => commands::skill::status(ctx),

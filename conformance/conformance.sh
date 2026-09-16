@@ -39,7 +39,11 @@ if [ ! -x "$BIN" ]; then
 fi
 
 echo "== agent-info manifest =="
-INFO="$("$BIN" agent-info 2>/dev/null)"
+if INFO="$("$BIN" agent-info 2>/dev/null)"; then
+  pass "agent-info exits 0"
+else
+  fail "agent-info exits 0"
+fi
 if printf '%s' "$INFO" | jq -e . >/dev/null 2>&1; then
   pass "agent-info emits valid JSON"
 else
@@ -61,7 +65,7 @@ check_json "exit codes 0-4 documented" "$INFO" \
 check_json "envelope shape documented" "$INFO" \
   '(.envelope.version=="1") and (.envelope|has("success")) and (.envelope|has("error"))'
 check_json "config path and env_prefix documented" "$INFO" \
-  '(.config.path|type=="string") and (.config.env_prefix|test("^[A-Z][A-Z0-9]*_$"))'
+  '(.config.path|type=="string") and (.config.env_prefix|test("^[A-Z][A-Z0-9_]*_$"))'
 check_json "auto_json_when_piped declared" "$INFO" \
   '.auto_json_when_piped == true'
 
@@ -79,8 +83,8 @@ echo "== command routability =="
 # Every command key in the manifest (possibly multi-word, e.g. "config show")
 # must accept --help with exit 0.
 while IFS= read -r cmd; do
-  # shellcheck disable=SC2086
-  if "$BIN" $cmd --help >/dev/null 2>&1; then
+  read -r -a cmd_parts <<< "$cmd"
+  if "$BIN" "${cmd_parts[@]}" --help >/dev/null 2>&1; then
     pass "routable: $cmd"
   else
     fail "routable: $cmd"

@@ -1,53 +1,31 @@
-# Update Standard
+# Update standard
 
-This is the framework standard for `update`, release artifacts, and package-manager
-handoff. The command is agent-facing, so it must be predictable, non-interactive,
-machine-readable, and honest about the channel that owns the installed binary.
+One `update` command, with behavior determined by the installation owner.
+Package managers own their binaries. Standalone installations may self-replace
+only after implementing the verification and replacement policy below.
 
-## Verdict
+## The reference implementation
 
-The old rule, "three install paths, one update mechanism", is wrong.
+The greeter returns installation instructions. It does not query releases,
+download an asset, run a package manager, or replace itself. Both `update` and
+`update --check` report `latest_version: null` and `status: "not_checked"` unless
+updates are disabled. This is an explicit scaffold boundary, not a completed
+release check. Replace the repository/package placeholders when copying it.
 
-The standard is:
+A distributed tool must implement its actual release lookup and test the
+appropriate upgrade path. Until then, retain honest instructions-only behavior.
 
-> One `update` command, distribution-aware update paths.
+## Command contract
 
-A binary installed by Homebrew should be upgraded by Homebrew. A binary installed
-by Cargo should be upgraded by Cargo or cargo-binstall. A standalone installer
-binary may replace itself from signed or attested release artifacts. Managed
-environments may disable mutation entirely.
+`update --check` never changes the installation, shell profile, or package-manager
+state. It emits the normal envelope and exits 0 when the check completes, including
+when an update exists. A failed lookup exits 1; invalid configuration exits 2.
+It must not create an operational lock simply to return local instructions.
 
-This matches the current high-standard pattern used by mature CLIs such as uv:
-self-update is only enabled for standalone installer installs; other install
-methods use their package manager's upgrade path.
+`update` either applies through the correct owner or returns a tested instruction.
+It must not overwrite a package-managed binary with a raw downloaded asset.
 
-## Command Contract
-
-Every framework CLI that supports updates exposes:
-
-```bash
-<tool> update --check
-<tool> update
-```
-
-`update --check` is always safe:
-
-- no filesystem mutation
-- no shell profile mutation
-- no package-manager upgrade
-- no stdout outside the normal success envelope
-- exit `0` when the check completes, even if an update is available
-- exit `1` for transient network/release lookup failures
-- exit `2` for invalid update configuration
-
-`update` either applies the update through the correct owner channel, or returns a
-tested instruction the agent can run literally. It must never try to overwrite a
-Homebrew, Cargo, npm, Bun, uv tool, pipx, apt, winget, or enterprise-managed
-binary with a raw GitHub asset.
-
-## Required JSON Shape
-
-`update --check --json` returns a normal success envelope. `data` must include:
+The success payload always includes these fields:
 
 ```json
 {
@@ -62,306 +40,84 @@ binary with a raw GitHub asset.
 }
 ```
 
-Allowed `status` values:
-
-- `up_to_date`
-- `update_available`
-- `updated`
-- `disabled`
-- `managed_install`
-- `unsupported_platform`
-
-Allowed `install_source` values:
-
-- `standalone`
-- `homebrew`
-- `cargo`
-- `cargo_binstall`
-- `npm`
-- `bun`
-- `uv_tool`
-- `pipx`
-- `winget`
-- `scoop`
-- `apt`
-- `managed`
-- `unknown`
-
-Allowed `update_mode` values:
-
-- `self_replace`
-- `package_manager`
-- `instructions_only`
-- `disabled`
-
-`agent-info` must describe the command, options, update sources, and package
-names. If any field is hand-maintained, tests must prove it matches the CLI.
-
-## Install Source Detection
-
-Detection order:
-
-1. Explicit config override, for example `update.install_source = "homebrew"`.
-2. Build-time metadata, for example `ACF_INSTALL_SOURCE=standalone` embedded by
-   release CI or installer scripts.
-3. Executable path heuristics:
-   - Homebrew: path contains `/Cellar/<formula>/` or `/opt/homebrew/bin`.
-   - Cargo: path is under `$CARGO_HOME/bin` or `~/.cargo/bin`.
-   - npm: path is under an npm global prefix or package shim.
-   - Bun package manager: path is under the Bun global bin directory.
-   - uv tool: path resolves under the uv tools directory.
-   - pipx: path is under `~/.local/bin` and `pipx list` confirms ownership.
-4. Package-manager queries when available:
-   - `brew list --versions <formula>`
-   - `cargo install --list`
-   - `cargo binstall --version` plus crate metadata
-   - `npm list -g <package> --json`
-   - `bun update --global --dry-run <package>`
-   - `uv tool list`
-   - `pipx list --json`
-5. `unknown`, with a safe manual instruction.
-
-Never guess silently. If detection is uncertain, return `install_source:
-"unknown"` and `update_mode: "instructions_only"`.
-
-## Channel Rules
-
-### Standalone
-
-Use GitHub Releases or the configured release host.
-
-Requirements:
-
-- select an asset by exact OS, architecture, libc, and binary name
-- reject prereleases unless `update.allow_prerelease = true`
-- download over HTTPS
-- verify SHA256 before replacement
-- verify signature or provenance when configured
-- unpack to a temp directory on the same filesystem as the current executable
-- run `<new-binary> --version` before replacing
-- replace atomically where the OS permits it
-- leave the old binary untouched if any check fails
-- after success, tell the agent to run `<tool> skill install` when the skill is
-  embedded in the binary
-
-Recommended implementation options:
-
-- Rust: `self_update` is acceptable for simple GitHub Release replacement, but
-  wrap it with install-source detection and checksum/provenance policy.
-- Rust with generated release artifacts: prefer cargo-dist for archives,
-  installers, Homebrew formulae, checksums, and optional updater support.
-
-### Homebrew
-
-Homebrew owns the file layout and bottle checksums. Do not self-replace.
-
-`update --check` may use `brew outdated --json=v2 <formula>` or release metadata.
-`update` should return or run:
-
-```bash
-brew upgrade <formula>
-```
-
-If the formula is in a tap:
-
-```bash
-brew upgrade owner/tap/<formula>
-```
-
-Release CI should publish a tap formula or use cargo-dist's Homebrew installer.
-The formula must have a stable `homepage`, `url`, `sha256`, `license`, and
-working `brew test`.
-
-### Cargo
-
-Cargo-installed tools are source builds. Do not self-replace.
-
-Preferred instruction:
-
-```bash
-cargo install --locked --force <crate>
-```
-
-If cargo-binstall is available and the project publishes compatible artifacts:
-
-```bash
-cargo binstall --no-confirm <crate>
-```
-
-Use crates.io metadata to check the latest published stable version. Do not treat
-GitHub-only releases as Cargo updates unless the crate was installed from Git.
-
-### uv Tool
-
-uv is a release and install channel for Python CLIs, not a Rust binary
-replacement mechanism.
-
-Use it when the CLI is a Python package with console scripts published to PyPI or
-another Python index. Release with `uv build` and `uv publish`; install and
-upgrade with `uv tool install <package>` and `uv tool upgrade <package>`.
-
-Do not self-replace a uv-installed tool. uv owns the virtual environment, linked
-executable, Python version, and upgrade constraints.
-
-Preferred instruction:
-
-```bash
-uv tool upgrade <package>
-```
-
-If the original install pinned constraints and the requested update should move
-beyond them, return:
-
-```bash
-uv tool install <package>
-```
-
-### Bun
-
-Bun can appear in two different release shapes:
-
-- Bun package-manager install: package with a `bin` entry installed globally by
-  Bun. Defer to Bun for upgrades.
-- Bun standalone executable: artifact produced by `bun build --compile`. Treat
-  this like any other standalone binary and use the standalone artifact rules
-  for checksums, provenance, temp-file staging, and atomic replacement.
-
-For a Bun package-manager install, use:
-
-```bash
-bun update --global <package>
-```
-
-For npm registry publication, `bun publish` is acceptable, but CI must use
-`bun publish --dry-run` or `bun pm pack` before release to verify package
-contents. For standalone executable release, build each target explicitly with
-`bun build --compile --target=...`, then publish the artifacts through the same
-release/checksum/provenance path as Rust binaries.
-
-### JavaScript, Python, and Other Languages
-
-The framework is Rust-first, but the update standard is language-neutral:
-
-- If the project ships a standalone executable, use the standalone rules.
-- If it is installed through npm, Bun, pipx, uv tool, pip, or another package
-  manager, defer to that manager.
-- If cargo-dist or another release tool wraps a non-Rust binary, the same
-  release artifact, checksum, and channel rules apply.
-
-Examples:
-
-```bash
-npm update -g <package>
-bun update --global <package>
-uv tool upgrade <package>
-pipx upgrade <package>
-winget upgrade --id <package-id>
-scoop update <package>
-```
-
-## Release Pipeline Standard
-
-For Rust CLIs, the recommended baseline is:
-
-1. Build and test on every PR:
-   - `cargo fmt --check`
-   - `cargo clippy --all-targets --all-features -- -D warnings`
-   - `cargo test --locked`
-   - `cargo dist plan` if cargo-dist is used
-2. Publish from signed version tags only:
-   - `vX.Y.Z` for single-crate repos
-   - `<crate>/vX.Y.Z` or `<crate>-vX.Y.Z` for multi-package repos
-3. Generate release artifacts in CI, not on a developer laptop.
-4. Produce artifacts for at least:
-   - `x86_64-unknown-linux-gnu`
-   - `aarch64-unknown-linux-gnu`
-   - `x86_64-apple-darwin`
-   - `aarch64-apple-darwin`
-   - `x86_64-pc-windows-msvc` if Windows is supported
-5. Publish:
-   - GitHub Release archives
-   - SHA256 checksums
-   - Homebrew tap formula when supported
-   - crates.io package when supported
-   - PyPI package when `uv tool` is a supported channel
-   - npm package when npm or Bun package-manager installs are supported
-   - cargo-binstall-compatible metadata or artifact names when supported
-6. Add provenance:
-   - GitHub artifact attestations for release artifacts
-   - SBOM or auditable dependency metadata for security-sensitive tools
-7. Smoke-test installs:
-   - standalone installer
-   - Homebrew install and upgrade path
-   - `cargo install --locked --force <crate>`
-   - `cargo binstall --no-confirm <crate>` when supported
-   - `uv tool install <package>` and `uv tool upgrade <package>` when supported
-   - `bun install --global <package>` and `bun update --global <package>` when supported
-   - `<tool> agent-info`
-   - `<tool> update --check --json`
-
-## Developer Configuration
-
-Every project must set these consciously:
-
-```toml
-[update]
-enabled = true
-install_source = "auto"
-owner = "your-org"
-repo = "your-repo"
-crate_name = "your-cli"
-formula = "your-cli"
-tap = "your-org/tap"
-
-# Standalone-channel policy -- implement these when you ship a standalone
-# installer that self-replaces:
-allow_prerelease = false
-require_checksum = true
-require_attestation = false
-```
-
-Key names match the `example/` config struct (`formula`, `tap`) -- do not
-invent variants like `brew_formula`.
-
-For enterprise or managed environments:
-
-```toml
-[update]
-enabled = false
-install_source = "managed"
-```
-
-The error suggestion for disabled updates must point to the exact manager-owned
-command or internal rollout process, never a generic "download latest" message.
-
-## Tests
-
-Minimum tests:
-
-- `update --check --json` returns a valid success envelope.
-- `update --check` writes no raw text to stdout when piped.
-- disabled update returns `status: "disabled"` and exit `0`.
-- Homebrew channel returns `brew upgrade ...` and does not call `self_update`.
-- Cargo channel returns `cargo install --locked --force ...` or `cargo binstall
-  --no-confirm ...` and does not call `self_update`.
-- unknown channel returns `instructions_only`, not a blind self-replacement.
-- malformed update config exits `2`.
-- release lookup failures exit `1`.
-- `agent-info` documents every update option that exists in clap.
-- suggestions are exact commands that pass a shell-parse test.
-
-## References
-
-- uv installation and upgrade policy: https://github.com/astral-sh/uv/blob/main/docs/getting-started/installation.md
-- cargo-dist Homebrew installer: https://axodotdev.github.io/cargo-dist/book/installers/homebrew.html
-- cargo-dist updater config: https://axodotdev.github.io/cargo-dist/book/reference/config.html#install-updater
-- cargo-dist supply-chain security: https://axodotdev.github.io/cargo-dist/book/supplychain-security/
-- cargo-binstall: https://github.com/cargo-bins/cargo-binstall
-- Cargo install: https://doc.rust-lang.org/stable/cargo/commands/cargo-install.html
-- Homebrew formula cookbook: https://docs.brew.sh/Formula-Cookbook
-- GitHub artifact attestations: https://docs.github.com/actions/concepts/security/artifact-attestations
-- uv tool/publish CLI reference: https://docs.astral.sh/uv/reference/cli/
-- Bun standalone executables: https://bun.sh/docs/bundler/executables
-- Bun global install: https://bun.sh/docs/pm/cli/install
-- Bun global update: https://bun.sh/docs/pm/cli/update
-- Bun publish: https://bun.sh/docs/pm/cli/publish
+| Field | Contract |
+| --- | --- |
+| `current_version` | Installed binary version |
+| `latest_version` | Verified available version, or null when not checked |
+| `status` | `not_checked`, `up_to_date`, `update_available`, `updated`, `disabled`, `managed_install`, or `unsupported_platform` |
+| `install_source` | `standalone`, `homebrew`, `cargo`, `cargo_binstall`, `npm`, `bun`, `uv_tool`, `pipx`, `winget`, `scoop`, `apt`, `managed`, or `unknown` |
+| `update_mode` | `self_replace`, `package_manager`, `instructions_only`, or `disabled` |
+| `upgrade_command` | A literal command for the configured package, or null; never prose disguised as a command |
+| `release_url` | Relevant release/instructions URL, or null |
+| `requires_skill_reinstall` | Whether an applied or available update requires refreshing the installed skill; false when unknown |
+
+These are command-payload statuses, separate from the envelope's status.
+The manifest must describe the installed implementation, including whether
+`--check` actually consults a release source. Never imply a check succeeded by
+copying the installed version into `latest_version`.
+
+## Determine ownership
+
+Prefer explicit configuration, then build/installer metadata, then reliable
+executable-path or package-manager ownership evidence. A path under a development
+`target/` directory does not prove standalone installation. Uncertain ownership
+means `unknown` and `instructions_only`.
+
+Use the configured package/formula identifier, preserving the installation's
+registry, tap, and pin policy. Validate or correctly quote dynamic values in any
+returned shell command. Do not switch a package-manager install to another channel.
+Managed installations follow the owner's rollout process. Disabled updates return
+`disabled`, exit 0, and no executable upgrade suggestion.
+
+For example, Homebrew uses `brew upgrade <formula>` and Cargo uses
+`cargo install --locked --force <crate>`. Use cargo-binstall only when that channel
+and the required artifacts are supported. Other managers retain their own upgrade
+semantics. The [uv installation policy](https://docs.astral.sh/uv/getting-started/installation/#upgrading-uv)
+is an example of this ownership boundary; [Cargo documents its install options](https://doc.rust-lang.org/cargo/commands/cargo-install.html).
+
+## Standalone replacement
+
+Before enabling `self_replace`, implement and test all of the following:
+
+1. Select the exact supported OS, architecture, libc, and binary asset. Respect
+   the configured stable/prerelease policy.
+2. Download over HTTPS with finite size/time limits. Verify the artifact's SHA256
+   against trusted release metadata before extraction or execution. Verify any
+   configured signature or attestation policy as well.
+3. Extract safely into a temporary directory on the target filesystem. Reject
+   path traversal and unexpected executable names.
+4. Validate the staged binary with `--version` and ensure it matches the requested
+   release. Keep its stdout inside the parent command's structured result.
+5. Hold an appropriate update lock; atomically replace where supported. Preserve
+   the installed binary when download, integrity, validation, or replacement fails.
+6. Report the installed version and whether `skill install` is needed. Test
+   interruption and concurrent attempts without corrupting either installation.
+
+A downloader crate alone does not establish these guarantees. The example omits
+one until the tool's release pipeline and verification policy are implemented.
+
+## Release pipeline
+
+Build release artifacts in CI, not on a developer laptop. Use cargo-dist or an
+equivalent reproducible pipeline for archives, checksums, installers, and supported
+package-manager metadata. Publish only platforms that are built and tested.
+Provide provenance/attestations when required by the deployment policy.
+
+Smoke-test each supported install channel and its upgrade path, then run
+`agent-info`, `update --check --json`, and the framework conformance checks against
+the installed binary. A successful compile is not an installation test.
+
+The example's active settings are in `UpdateConfig`: `enabled`, `install_source`,
+`owner`, `repo`, `crate_name`, `formula`, and `tap`. Add new checksum, signature, or
+prerelease settings only with code that enforces them; avoid decorative config.
+
+## Required checks
+
+- Check mode emits one valid envelope without mutation or extra stdout.
+- Disabled, unknown, and package-managed sources never self-replace.
+- Unknown release state remains null/`not_checked`.
+- Actual checks distinguish current, available, failed, and unsupported outcomes.
+- Returned commands name the correct package and parse safely as shell commands.
+- Real downloaders reject corrupt/wrong-platform assets and preserve the old binary.
+- A second updater cannot invalidate the active owner's lock.
+- Manifest options and effects match the implemented update paths.

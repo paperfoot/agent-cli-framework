@@ -33,11 +33,11 @@ fn doctor_fails_on_malformed_config() {
 
     assert_eq!(out.status.code(), Some(2));
 
-    // Report still lands on stdout; the error envelope goes to stderr.
-    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert!(report["data"]["summary"]["fail"].as_u64().unwrap() >= 1);
+    // One failed outcome, including the report, on stderr.
+    assert!(out.stdout.is_empty());
 
     let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
     assert_eq!(err["status"], "error");
     assert_eq!(err["error"]["code"], "config_error");
+    assert!(err["error"]["details"]["summary"]["fail"].as_u64().unwrap() >= 1);
 }

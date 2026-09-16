@@ -1,82 +1,53 @@
-# Contributing to Agent CLI Framework
+# Contributing
 
-Thanks for your interest in contributing.
+Bring a reproducible agent failure, a useful simplification, or a measured
+improvement. Keep changes focused and preserve public contracts unless the
+benefit warrants a documented migration.
 
-## How to contribute
+## Where changes belong
 
-1. Fork the repo and create a branch from `main`.
-2. Make your changes. Keep them focused -- one concern per PR.
-3. If you add a pattern, include it in the README, AGENTS.md, and the `example/` CLI -- all three must stay in lockstep.
-4. Run the full test suite:
-   ```bash
-   cd example && cargo test --locked
-   ```
-   All integration tests must pass. They verify:
-   - Exit code contracts (0-4)
-   - JSON envelope structure (success + error)
-   - `--help`/`--version` exit 0
-   - `agent-info` manifest matches actual commands
-   - Piped output auto-switches to JSON
-5. Open a pull request with a clear description of what you changed and why.
+| File | Purpose |
+| --- | --- |
+| `README.md` | Short introduction and navigation |
+| `AGENTS.md` | Build instructions agents can act on |
+| `docs/` | Design, implementation, release, and evaluation guidance |
+| `schemas/` | Published JSON shapes |
+| `example/src/` | Runnable reference implementation |
+| `example/tests/` | Observable contract tests |
+| `conformance/` | Portable probe, full schema validation, and measurements |
 
-## Project structure
+Update relevant instructions, implementation, and tests together. Keep code in
+the example rather than duplicating helper implementations in documentation.
+The greeter is a small scaffold; domain-specific features belong in real tools.
 
-```
-README.md              # Full framework documentation: philosophy, patterns, reusable modules
-AGENTS.md              # Condensed build instructions for AI coding agents
-CONTRIBUTING.md        # This file
-docs/                  # Standards (update-standard.md)
-schemas/               # Normative JSON Schemas: envelope, agent-info manifest
-conformance/           # conformance.sh -- behavioral probe for any built binary
-.github/workflows/     # CI: builds, tests, and runs conformance on macOS + Linux
-example/
-  src/
-    main.rs            # Entry point: parse, detect format, dispatch, exit
-    cli.rs             # Clap derive definitions + rich help footer
-    config.rs          # Config loading via figment (defaults -> TOML -> env vars)
-    error.rs           # Error enum with exit_code(), error_code(), suggestion()
-    output.rs          # Format detection, Ctx struct, JSON envelope helpers
-    guard.rs           # Duplicate guard (lock file, PID + staleness)
-    commands/
-      mod.rs           # Re-exports
-      hello.rs         # Domain command example (placeholder)
-      agent_info.rs    # Enriched capability manifest with arg schemas
-      config.rs        # config show/path
-      contract.rs      # Hidden deterministic exit-code trigger for tests
-      doctor.rs        # Dependency diagnostics
-      skill.rs         # Skill install + status (uses CARGO_PKG_NAME)
-      update.rs        # Distribution-aware update (repo configurable via config)
-  tests/
-    exit_code_contracts.rs   # All 5 exit codes verified
-    output_contracts.rs      # JSON envelope shape, quiet flag, rich help
-    agent_info_contract.rs   # Manifest fields, routable commands, arg schemas
-    doctor_contract.rs       # Doctor pass/fail exit contract
-    update_contract.rs       # Distribution-aware update channels
-    robustness.rs            # Malformed config resilience, edge cases
-  Cargo.toml
+## Validate a change
+
+From the repository root:
+
+```bash
+cargo fmt --manifest-path example/Cargo.toml --check
+cargo clippy --manifest-path example/Cargo.toml --all-targets --all-features --locked -- -D warnings
+cargo test --manifest-path example/Cargo.toml --locked
+cargo build --manifest-path example/Cargo.toml --release --locked
+conformance/conformance.sh example/target/release/greeter
+python3 -m venv /tmp/acf-validation
+/tmp/acf-validation/bin/pip install -r conformance/requirements.txt
+/tmp/acf-validation/bin/python conformance/validate.py example/target/release/greeter --example
+python3 conformance/measure.py example/target/release/greeter --command hello
 ```
 
-## What's useful
+The Bash probe needs `jq`. Python schema validation needs `jsonschema`; the
+measurement script uses only the standard library. CI runs the same contract
+checks on macOS and Linux. A domain CLI should run schema validation without
+`--example`, then add its own controlled fixtures.
 
-- New patterns or refinements to existing ones, backed by real-world agent usage.
-- Bug fixes or improvements to the example CLI.
-- Documentation improvements that make the patterns clearer or more precise.
-- Additional integration tests verifying framework invariants.
-- Links to additional CLIs built with this architecture.
+Test outcomes, stream discipline, defaults, aliases, recovery, and relevant state
+changes. Never execute arbitrary manifest examples against a live account as a
+generic conformance check. For timing changes, report the measured setup and
+paired results; see [evaluation](docs/evaluation.md).
 
-## Guidelines
+Open a pull request describing the problem, resulting behavior, validation, and
+compatibility implications. Cite sources for technical claims. Write short,
+plain sentences and give examples that actually work.
 
-- The example implements all eight patterns and is the scaffold agents copy. Helper modules with no pattern of their own (secret handling, HTTP retry) live as code snippets in the README's Reusable Modules section.
-- Keep the example minimal -- it demonstrates patterns, not a real product.
-- Ensure the README, AGENTS.md, and example stay consistent with each other.
-- All new patterns must have corresponding integration tests.
-
-## Style
-
-- Write like you're explaining to a colleague. Short sentences. Active voice.
-- Code examples should be minimal and runnable.
-- If you reference a claim, link to the source.
-
-## License
-
-By contributing, you agree that your contributions will be licensed under the MIT License.
+Contributions are licensed under the [MIT License](LICENSE).

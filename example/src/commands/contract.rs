@@ -11,7 +11,7 @@ pub fn run(ctx: Ctx, code: i32) -> Result<(), AppError> {
             let data = serde_json::json!({"contract": true, "exit_code": 0});
             output::print_success_or(ctx, &data, |_| {
                 println!("contract: success");
-            });
+            })?;
             Ok(())
         }
         1 => Err(AppError::Transient("contract: transient error".into())),

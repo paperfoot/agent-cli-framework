@@ -1,0 +1,247 @@
+{
+  "date": "2026-09-11",
+  "hardware": "Apple M4 Max",
+  "baseline_revision": "a7797eb3d1013d52830143e0f03e13d99b812bed",
+  "revised_source": "September 2026 working tree",
+  "scope": "Ten sequential samples per case, warm caches. Shared workstation; not interleaved or a controlled latency trial. Rust reference discovery only.",
+  "builds": {
+    "before": {
+      "bytes": 7293264,
+      "sha256": "19dff272b0137382da5425f4e6cf48571219c8462bdc6ac1f93be6d36b534b60",
+      "profile": "cargo --release, prior default profile"
+    },
+    "after": {
+      "bytes": 1298192,
+      "sha256": "8219dc8ba2a858af91f2050ca09f21dd96c7de1ebf2233f2dce3b28f4c709b91",
+      "profile": "cargo --release, LTO/one codegen unit/strip/opt-level 3"
+    }
+  },
+  "reports": {
+    "resources_before": {
+      "binary": "baseline-greeter",
+      "cases": {
+        "agent_info": {
+          "argv": [
+            "baseline-greeter",
+            "agent-info"
+          ],
+          "p50_cpu_ms": 11.35,
+          "p50_ms": 27.414,
+          "p50_peak_rss_bytes": 7348224,
+          "p95_cpu_ms": 13.281,
+          "p95_ms": 51.564,
+          "p95_peak_rss_bytes": 7381811,
+          "stderr_bytes": 0,
+          "stdout_bytes": 3452
+        },
+        "help": {
+          "argv": [
+            "baseline-greeter",
+            "--help"
+          ],
+          "p50_cpu_ms": 10.86,
+          "p50_ms": 44.598,
+          "p50_peak_rss_bytes": 7274496,
+          "p95_cpu_ms": 11.914,
+          "p95_ms": 117.361,
+          "p95_peak_rss_bytes": 7299891,
+          "stderr_bytes": 0,
+          "stdout_bytes": 1460
+        },
+        "version": {
+          "argv": [
+            "baseline-greeter",
+            "--version"
+          ],
+          "p50_cpu_ms": 11.356,
+          "p50_ms": 32.158,
+          "p50_peak_rss_bytes": 7192576,
+          "p95_cpu_ms": 12.495,
+          "p95_ms": 55.545,
+          "p95_peak_rss_bytes": 7225344,
+          "stderr_bytes": 0,
+          "stdout_bytes": 90
+        }
+      },
+      "latency_scope": "Child wall time including process startup, measured inside a fresh helper after one untimed warmup; warm OS caches, not a true cold start; helper overhead excluded.",
+      "platform": "macOS-26.5.1-arm64-arm-64bit",
+      "python_version": "3.12.12",
+      "resource_scope": "Fresh-child user plus system CPU time and peak RSS per invocation; peak RSS uses ru_maxrss platform units converted to bytes. These metrics do not measure power or cost.",
+      "samples": 10,
+      "version": "1"
+    },
+    "resources_after": {
+      "binary": "revised-greeter",
+      "cases": {
+        "agent_info": {
+          "argv": [
+            "revised-greeter",
+            "agent-info"
+          ],
+          "p50_cpu_ms": 10.636,
+          "p50_ms": 29.03,
+          "p50_peak_rss_bytes": 6987776,
+          "p95_cpu_ms": 12.405,
+          "p95_ms": 50.223,
+          "p95_peak_rss_bytes": 7012352,
+          "stderr_bytes": 0,
+          "stdout_bytes": 3558
+        },
+        "agent_info_filtered": {
+          "argv": [
+            "revised-greeter",
+            "agent-info",
+            "--command",
+            "hello"
+          ],
+          "p50_cpu_ms": 10.945,
+          "p50_ms": 34.843,
+          "p50_peak_rss_bytes": 6938624,
+          "p95_cpu_ms": 12.106,
+          "p95_ms": 101.277,
+          "p95_peak_rss_bytes": 7004979,
+          "stderr_bytes": 0,
+          "stdout_bytes": 1394
+        },
+        "help": {
+          "argv": [
+            "revised-greeter",
+            "--help"
+          ],
+          "p50_cpu_ms": 10.525,
+          "p50_ms": 28.454,
+          "p50_peak_rss_bytes": 6610944,
+          "p95_cpu_ms": 12.232,
+          "p95_ms": 58.987,
+          "p95_peak_rss_bytes": 6635520,
+          "stderr_bytes": 0,
+          "stdout_bytes": 1417
+        },
+        "version": {
+          "argv": [
+            "revised-greeter",
+            "--version"
+          ],
+          "p50_cpu_ms": 10.782,
+          "p50_ms": 20.732,
+          "p50_peak_rss_bytes": 6504448,
+          "p95_cpu_ms": 12.271,
+          "p95_ms": 33.388,
+          "p95_peak_rss_bytes": 6537216,
+          "stderr_bytes": 0,
+          "stdout_bytes": 68
+        }
+      },
+      "comparison": {
+        "baseline": "prior discovery report",
+        "cases": {
+          "agent_info": {
+            "stdout_bytes": {
+              "after": 3558,
+              "before": 3452,
+              "delta_percent": 3.071
+            }
+          },
+          "help": {
+            "stdout_bytes": {
+              "after": 1417,
+              "before": 1460,
+              "delta_percent": -2.945
+            }
+          },
+          "version": {
+            "stdout_bytes": {
+              "after": 68,
+              "before": 90,
+              "delta_percent": -24.444
+            }
+          }
+        }
+      },
+      "latency_scope": "Child wall time including process startup, measured inside a fresh helper after one untimed warmup; warm OS caches, not a true cold start; helper overhead excluded.",
+      "platform": "macOS-26.5.1-arm64-arm-64bit",
+      "python_version": "3.12.12",
+      "resource_scope": "Fresh-child user plus system CPU time and peak RSS per invocation; peak RSS uses ru_maxrss platform units converted to bytes. These metrics do not measure power or cost.",
+      "samples": 10,
+      "version": "1"
+    },
+    "direct_after": {
+      "binary": "revised-greeter",
+      "cases": {
+        "agent_info": {
+          "argv": [
+            "revised-greeter",
+            "agent-info"
+          ],
+          "p50_ms": 18.535,
+          "p95_ms": 28.345,
+          "stderr_bytes": 0,
+          "stdout_bytes": 3558
+        },
+        "agent_info_filtered": {
+          "argv": [
+            "revised-greeter",
+            "agent-info",
+            "--command",
+            "hello"
+          ],
+          "p50_ms": 17.739,
+          "p95_ms": 25.376,
+          "stderr_bytes": 0,
+          "stdout_bytes": 1394
+        },
+        "help": {
+          "argv": [
+            "revised-greeter",
+            "--help"
+          ],
+          "p50_ms": 17.137,
+          "p95_ms": 30.241,
+          "stderr_bytes": 0,
+          "stdout_bytes": 1417
+        },
+        "version": {
+          "argv": [
+            "revised-greeter",
+            "--version"
+          ],
+          "p50_ms": 16.247,
+          "p95_ms": 24.86,
+          "stderr_bytes": 0,
+          "stdout_bytes": 68
+        }
+      },
+      "comparison": {
+        "baseline": "prior discovery report",
+        "cases": {
+          "agent_info": {
+            "stdout_bytes": {
+              "after": 3558,
+              "before": 3452,
+              "delta_percent": 3.071
+            }
+          },
+          "help": {
+            "stdout_bytes": {
+              "after": 1417,
+              "before": 1460,
+              "delta_percent": -2.945
+            }
+          },
+          "version": {
+            "stdout_bytes": {
+              "after": 68,
+              "before": 90,
+              "delta_percent": -24.444
+            }
+          }
+        }
+      },
+      "latency_scope": "Process startup with warm OS caches after one untimed warmup; not a true cold start.",
+      "platform": "macOS-26.5.1-arm64-arm-64bit",
+      "python_version": "3.12.12",
+      "samples": 10,
+      "version": "1"
+    }
+  }
+}
