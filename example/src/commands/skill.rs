@@ -22,8 +22,8 @@ description: >
 ## {name}
 
 Run `{name} hello Ada --style pirate`. For another command, inspect it with
-`{name} agent-info --command "config show"`. Use `{name} --help` as the index;
-`{name} agent-info` returns everything. Reuse discovery for the installed version.
+`{name} agent-info --command "config show"`. `{name} agent-info` lists every
+command on one line. Reuse discovery for the installed version.
 "#
     )
 }

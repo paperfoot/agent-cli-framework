@@ -163,7 +163,10 @@ install_source = "spaceship"
 
 #[test]
 fn agent_info_documents_update_contract_shape() {
-    let out = greeter().arg("agent-info").output().unwrap();
+    let out = greeter()
+        .args(["agent-info", "--command", "update"])
+        .output()
+        .unwrap();
     assert!(out.status.success());
     let info: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
 

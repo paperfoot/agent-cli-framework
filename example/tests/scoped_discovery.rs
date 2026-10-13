@@ -53,27 +53,47 @@ fn full_manifest_is_raw_and_uses_canonical_leaf_paths() {
             "update",
         ])
     );
-    for (path, command) in info["commands"].as_object().unwrap() {
+    // One generated line per command; the full object is one --command away.
+    for (path, line) in info["commands"].as_object().unwrap() {
+        let line = line.as_str().unwrap_or_else(|| panic!("{path}: one line"));
+        let scoped = run_json(tmp.path(), &["agent-info", "--command", path]);
+        let command = &scoped["commands"][path];
         assert!(command["description"].is_string(), "{path}: description");
-        assert!(command["args"].is_array(), "{path}: args");
-        assert!(command["options"].is_array(), "{path}: options");
+        assert!(
+            line.contains(command["description"].as_str().unwrap()),
+            "{path}: {line}"
+        );
+        for arg in command["args"].as_array().unwrap() {
+            assert!(
+                line.contains(arg["name"].as_str().unwrap()),
+                "{path}: {line}"
+            );
+        }
+        for option in command["options"].as_array().unwrap() {
+            assert!(
+                line.contains(option["name"].as_str().unwrap()),
+                "{path}: {line}"
+            );
+        }
     }
 }
 
 #[test]
-fn hello_scope_is_an_exact_projection_of_the_full_manifest() {
+fn scoped_output_is_name_version_and_the_selected_command_only() {
     let tmp = tempfile::tempdir().unwrap();
     let full = run_json(tmp.path(), &["agent-info"]);
     let scoped = run_json(tmp.path(), &["agent-info", "--command", "hello"]);
 
+    let keys: BTreeSet<&str> = scoped
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(keys, BTreeSet::from(["commands", "name", "version"]));
+    assert_eq!(scoped["name"], full["name"]);
+    assert_eq!(scoped["version"], full["version"]);
     assert_eq!(commands(&scoped), BTreeSet::from(["hello"]));
-    assert_eq!(scoped["commands"]["hello"], full["commands"]["hello"]);
-
-    let mut full_metadata = full.clone();
-    let mut scoped_metadata = scoped.clone();
-    full_metadata.as_object_mut().unwrap().remove("commands");
-    scoped_metadata.as_object_mut().unwrap().remove("commands");
-    assert_eq!(scoped_metadata, full_metadata);
 }
 
 #[test]
@@ -90,8 +110,9 @@ fn group_and_nested_scopes_select_only_the_requested_commands() {
     assert_eq!(commands(&show), BTreeSet::from(["config show"]));
     assert_eq!(
         show["commands"]["config show"],
-        full["commands"]["config show"]
+        config["commands"]["config show"]
     );
+    assert!(full["commands"]["config show"].is_string());
 }
 
 #[test]
@@ -150,8 +171,9 @@ fn every_advertised_example_executes_in_an_isolated_home() {
     let manifest_home = tempfile::tempdir().unwrap();
     let manifest = run_json(manifest_home.path(), &["agent-info"]);
 
-    for (path, command) in manifest["commands"].as_object().unwrap() {
-        let examples = command["examples"]
+    for path in manifest["commands"].as_object().unwrap().keys() {
+        let scoped = run_json(manifest_home.path(), &["agent-info", "--command", path]);
+        let examples = scoped["commands"][path]["examples"]
             .as_array()
             .unwrap_or_else(|| panic!("{path} should advertise examples"));
         assert!(!examples.is_empty(), "{path} should advertise an example");

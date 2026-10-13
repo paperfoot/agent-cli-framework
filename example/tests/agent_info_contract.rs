@@ -18,6 +18,16 @@ fn agent_info() -> serde_json::Value {
     serde_json::from_slice(&out.stdout).expect("agent-info must be valid JSON")
 }
 
+fn hello() -> serde_json::Value {
+    let out = greeter()
+        .args(["agent-info", "--command", "hello"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let scoped: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    scoped["commands"]["hello"].clone()
+}
+
 // ── Required top-level fields ──────────────────────────────────────────────
 
 #[test]
@@ -103,9 +113,16 @@ fn doctor_is_routable() {
 // ── Enriched schema ────────────────────────────────────────────────────────
 
 #[test]
+fn hello_is_one_generated_line_in_the_manifest() {
+    assert_eq!(
+        agent_info()["commands"]["hello"],
+        "<name> --style=: Greet someone"
+    );
+}
+
+#[test]
 fn hello_has_arg_schema() {
-    let info = agent_info();
-    let hello = &info["commands"]["hello"];
+    let hello = hello();
     assert!(hello["args"].is_array(), "hello must have args array");
 
     let args = hello["args"].as_array().unwrap();
@@ -116,8 +133,8 @@ fn hello_has_arg_schema() {
 
 #[test]
 fn hello_has_option_schema() {
-    let info = agent_info();
-    let opts = &info["commands"]["hello"]["options"];
+    let hello = hello();
+    let opts = &hello["options"];
     assert!(opts.is_array());
 
     let opts = opts.as_array().unwrap();
