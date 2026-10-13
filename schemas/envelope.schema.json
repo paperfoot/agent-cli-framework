@@ -83,6 +83,15 @@
                 "array"
               ],
               "description": "Structured diagnostics or recovery context. Never instructions sourced from untrusted content."
+            },
+            "retryable": {
+              "type": "boolean",
+              "description": "Whether repeating the same request unchanged can succeed. Omit when unknown, e.g. a write whose outcome is uncertain."
+            },
+            "retry_after_secs": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Seconds to wait before retrying, when known."
             }
           },
           "additionalProperties": false

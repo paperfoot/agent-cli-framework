@@ -5,8 +5,8 @@
 #
 # Probes a built binary against the behavioral contract in README/AGENTS.md:
 # manifest shape, command routability, help/version behavior, stderr
-# discipline, and (when the hidden `contract` hook exists) the 0-4 exit-code
-# contract. The JSON Schemas in schemas/ are the normative shape definitions;
+# discipline, and (when the hidden `contract` hook exists) every documented
+# exit code. The JSON Schemas in schemas/ are the normative shape definitions;
 # this script checks the load-bearing subset with jq so it runs anywhere.
 #
 # Requires: bash, jq. Exit 0 = conformant, 1 = violations found.
@@ -20,12 +20,14 @@ pass() { printf '  \033[32m✓\033[0m %s\n' "$1"; }
 fail() { printf '  \033[31m✗\033[0m %s\n' "$1"; FAIL=1; }
 note() { printf '  \033[33m·\033[0m %s\n' "$1"; }
 
-# check_json <description> <json> <jq-boolean-filter>
+# check_json <description> <json> <jq-boolean-filter> [jq options...]
 check_json() {
-  if printf '%s' "$2" | jq -e "$3" >/dev/null 2>&1; then
-    pass "$1"
+  local desc="$1" json="$2" filter="$3"
+  shift 3
+  if printf '%s' "$json" | jq -e "$@" "$filter" >/dev/null 2>&1; then
+    pass "$desc"
   else
-    fail "$1"
+    fail "$desc"
   fi
 }
 
@@ -56,18 +58,38 @@ check_json "has name, version, description" "$INFO" \
   '(.name|type=="string") and (.version|type=="string") and (.description|type=="string")'
 check_json "has non-empty commands object" "$INFO" \
   '(.commands|type=="object") and ((.commands|length) > 0)'
-check_json "every command is an object with description/args/options" "$INFO" \
-  '[.commands[] | (type=="object") and has("description") and has("args") and has("options")] | all'
+check_json "every command is a signature line or an object with description/args/options" "$INFO" \
+  '[.commands[] | (type=="string" and length > 0) or ((type=="object") and has("description") and has("args") and has("options"))] | all'
+if printf '%s' "$INFO" | jq -e '[.commands[] | type=="object"] | any' >/dev/null 2>&1; then
+  note "default manifest lists full command objects; one signature line each costs fewer tokens (full object via --command)"
+fi
 check_json "global_flags documents --json and --quiet" "$INFO" \
   '(.global_flags["--json"]|type=="object") and (.global_flags["--quiet"]|type=="object")'
 check_json "exit codes 0-4 documented" "$INFO" \
   '[.exit_codes["0","1","2","3","4"]] | all(type=="string")'
+check_json "other exit codes are documented integers >= 5" "$INFO" \
+  '[.exit_codes | keys[] | test("^(0|[1-9][0-9]*)$")] | all'
 check_json "envelope shape documented" "$INFO" \
   '(.envelope.version=="1") and (.envelope|has("success")) and (.envelope|has("error"))'
 check_json "config path and env_prefix documented" "$INFO" \
   '(.config.path|type=="string") and (.config.env_prefix|test("^[A-Z][A-Z0-9_]*_$"))'
 check_json "auto_json_when_piped declared" "$INFO" \
   '.auto_json_when_piped == true'
+
+echo "== scoped discovery =="
+FIRST="$(printf '%s' "$INFO" | jq -r '.commands | keys[0] // empty' 2>/dev/null)"
+if [ -n "$FIRST" ] && SCOPED="$("$BIN" agent-info --command "$FIRST" 2>/dev/null)"; then
+  check_json "agent-info --command returns name, version and the selected commands" "$SCOPED" \
+    '(.name|type=="string") and (.version|type=="string") and ((.commands|length) > 0) and ([.commands | keys[] | . == $p or startswith($p + " ")] | all)' \
+    --arg p "$FIRST"
+  check_json "scoped commands are full objects with description/args/options" "$SCOPED" \
+    '[.commands[] | (type=="object") and has("description") and has("args") and has("options")] | all'
+  if printf '%s' "$SCOPED" | jq -e 'keys - ["name","version","commands"] | length > 0' >/dev/null 2>&1; then
+    note "scoped output repeats manifest fields; name, version and commands are enough"
+  fi
+else
+  note "no agent-info --command -- scoped discovery not probed"
+fi
 
 echo "== help and version =="
 "$BIN" --help >/dev/null 2>&1 && pass "--help exits 0" || fail "--help exits 0"
@@ -115,12 +137,12 @@ echo "== exit-code contract =="
 # The hidden `contract <code>` hook deterministically triggers each exit code.
 # Recommended in every framework CLI; probed only when present.
 if "$BIN" contract 0 >/dev/null 2>&1; then
-  for code in 1 2 3 4; do
+  for code in $(printf '%s' "$INFO" | jq -r '.exit_codes | keys[] | select(. != "0")'); do
     GOT=$("$BIN" contract "$code" >/dev/null 2>&1; echo $?)
     [ "$GOT" = "$code" ] && pass "contract $code exits $code" || fail "contract $code exits $code (got $GOT)"
   done
 else
-  note "no hidden 'contract' hook -- exit codes 1-4 not probed (add the hook; see example/)"
+  note "no hidden 'contract' hook -- documented exit codes not probed (add the hook; see example/)"
 fi
 
 echo

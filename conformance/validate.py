@@ -27,6 +27,10 @@ def main():
         schema = json.loads((schemas / f"{name}.schema.json").read_text())
         Draft202012Validator.check_schema(schema)
         validators[name] = Draft202012Validator(schema)
+    # Check each discovery response against its own shape, not either one.
+    branch = {k: v for k, v in validators["agent-info"].schema.items() if k != "anyOf"}
+    for shape in ("manifest", "scoped"):
+        validators[shape] = Draft202012Validator({**branch, "$ref": f"#/$defs/{shape}"})
     count = 0
     with tempfile.TemporaryDirectory(prefix="acf-schema-") as home:
         env = dict(
@@ -41,7 +45,7 @@ def main():
         if args.example:
             env = {k: v for k, v in env.items() if not k.startswith("GREETER_")}
 
-        def run(argv, code=0, manifest=False):
+        def run(argv, code=0, shape="envelope"):
             nonlocal count
             result = subprocess.run(
                 [binary, *argv],
@@ -65,54 +69,71 @@ def main():
                     f"{argv}: unexpected output on {'stderr' if code == 0 else 'stdout'}"
                 )
             value = json.loads(payload)
-            validators["agent-info" if manifest else "envelope"].validate(value)
-            if not manifest and value["status"] != (
+            validators[shape].validate(value)
+            if shape == "envelope" and value["status"] != (
                 "success" if code == 0 else "error"
             ):
                 raise ValueError(f"{argv}: status disagrees with exit code")
             count += 1
             return value
 
-        full = run(["agent-info"], manifest=True)
+        full = run(["agent-info"], shape="manifest")
         run(["--help", "--json"])
         run(["--version", "--json"])
         run(["definitely-not-a-command-xyz", "--json"], code=3)
-        scoped = any(
-            o["name"] == "--command" for o in full["commands"]["agent-info"]["options"]
+        info = full["commands"].get("agent-info", "")
+        scoped = (
+            "--command" in info
+            if isinstance(info, str)
+            else any(o["name"] == "--command" for o in info.get("options", []))
         )
         for path, command in full["commands"].items():
             parts = path.split()
             run([*parts, "--help", "--json"])
-            for alias in command.get("aliases", []):
-                run([*parts[:-1], alias, "--help", "--json"])
+            selected = {path: command} if isinstance(command, dict) else {}
             if scoped:
-                filtered = run(["agent-info", "--command", path], manifest=True)
-                expected = dict(full, commands={path: command})
-                if filtered != expected:
-                    raise ValueError(
-                        f"{path}: filtered discovery differs from the full manifest"
-                    )
+                filtered = run(["agent-info", "--command", path], shape="scoped")
+                if (filtered["name"], filtered["version"]) != (
+                    full["name"],
+                    full["version"],
+                ):
+                    raise ValueError(f"{path}: scoped name/version differ from the manifest")
+                selected = filtered["commands"]
+                if any(k != path and not k.startswith(f"{path} ") for k in selected):
+                    raise ValueError(f"{path}: scoped discovery returned other commands")
+                if isinstance(command, dict) and selected.get(path) != command:
+                    raise ValueError(f"{path}: scoped object differs from the manifest")
+            for key, entry in selected.items():
+                for alias in entry.get("aliases", []):
+                    run([*key.split()[:-1], alias, "--help", "--json"])
         if scoped:
             run(["agent-info", "--command", "definitely-not-a-command-xyz"], code=3)
+        # The hidden contract hook is harmless by design; probe every documented code.
+        hook = subprocess.run(
+            [binary, "contract", "0"], capture_output=True, env=env, cwd=home,
+            stdin=subprocess.DEVNULL, timeout=10,
+        )
+        if hook.returncode == 0:
+            for code in sorted(int(c) for c in full["exit_codes"]):
+                run(["contract", str(code)], code=code)
         run(["config", "path"])
         run(["skill", "status"])
         if args.example:
             run(["hello", "Ada", "--style", "pirate"])
             run(["hello", "Ada", "--style", "invalid"], code=3)
             run(["doctor"])
-            for code in range(5):
-                run(["contract", str(code)], code=code)
             config = Path(run(["config", "path"])["data"]["path"])
             config.parent.mkdir(parents=True, exist_ok=True)
             config.write_text("style = [invalid toml")
             run(["doctor"], code=2)
-            run(["agent-info", "--command", "hello"], manifest=True)
+            run(["agent-info", "--command", "hello"], shape="scoped")
     print(
         json.dumps(
             {
                 "status": "success",
                 "validated_responses": count,
                 "scoped_discovery": scoped,
+                "contract_hook": hook.returncode == 0,
             }
         )
     )
