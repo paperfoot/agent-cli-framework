@@ -14,16 +14,28 @@ greeter agent-info --command "config show"
 greeter agent-info --command config
 ```
 
-The default is the full manifest. A canonical leaf path selects that command; a
-group selects descendants. Empty or unknown paths fail with exit 3. Command
-aliases execute normally but filters use canonical paths. Selection changes only
-`commands`; all top-level metadata stays identical. Filtering never executes the
-selected command. Piped, TTY, `--json`, and `--quiet` discovery all produce JSON.
+The default manifest contains `name`, binary `version`, `description`,
+`commands`, `global_flags`, `exit_codes`, `envelope`, `config`, and
+`auto_json_when_piped`. `commands` maps each canonical path to one line
+generated from the parser:
 
-The manifest contains `name`, binary `version`, `description`, `commands`,
-`global_flags`, `exit_codes`, `envelope`, `config`, and `auto_json_when_piped`.
-Each command has `description`, `args`, and `options`; aliases are arrays.
-Configuration metadata nests under `config.path` and `config.env_prefix`.
+```json
+{"hello":"<name> --style=: Greet someone","update":"--check --force: Distribution-aware update check/apply"}
+```
+
+`<x>` is required, `[x]` optional, `...` repeats, `--flag=` takes a value,
+`--flag=<flag>` is a required flag, and a bare `--flag` is a switch. A large
+group may take one line naming its subcommands if its key is a valid
+`--command` path. Full command objects in the default manifest remain valid but
+cost more tokens (32.6 KB against 7.0 KB as lines on a 101-command CLI).
+
+`--command PATH` returns only `name`, `version`, and `commands`, where each
+selected command is a full object: `description`, `args`, `options` (with
+types, defaults, allowed values, short forms), `aliases`, and annotations. A
+canonical leaf path selects that command; a group selects descendants. Empty or
+unknown paths fail with exit 3. Command aliases execute normally but filters use
+canonical paths. Filtering never executes the selected command. Piped, TTY,
+`--json`, and `--quiet` discovery all produce JSON.
 
 The reference derives syntax from Clap and adds these semantic annotations:
 
@@ -82,7 +94,10 @@ stderr in machine mode:
 ```
 
 `error.details` is an optional object or array for structured diagnostics. For
-provider failures it can carry known request IDs, retry delays, or outcome state.
+provider failures it can carry known request IDs or outcome state. Optional
+`error.retryable` says whether repeating the same request unchanged can succeed,
+and `error.retry_after_secs` how long to wait first. Omit `retryable` when the
+outcome is uncertain, such as a write that may have landed.
 Never expose secrets or raw untrusted provider instructions in recovery fields.
 
 | Exit | Meaning | Recovery |
@@ -93,7 +108,9 @@ Never expose secrets or raw untrusted provider instructions in recovery fields.
 | 3 | Invalid input or conflict | Correct arguments or resolve the conflict |
 | 4 | Rate limit | Honor backoff; retain the same logical request identity |
 
-No other application error codes. Host termination signals are outside the CLI's
+A tool may add domain codes from 5 up when each is documented in the manifest's
+`exit_codes` and the contract hook triggers it (xmaster: 5 = blocked by the
+provider; do not retry unchanged). Host termination signals are outside the CLI's
 ability to promise an envelope. A killed process or timeout does not establish
 whether a remote action happened.
 
@@ -112,9 +129,11 @@ report in `error.details` on stderr and exit 2. Missing optional config is a war
 
 Root and command `--help` and root `--version` exit 0 and print plain text, even
 when piped: agents read help rather than parse it. With `--json` their text is in
-`data.usage` of a success envelope. A parse error inside a known command suggests
-`agent-info --command "<path>"` for that command, so the retry needs one scoped
-lookup instead of the root help. Global `--json` works before or after a command. Tokens after
+`data.usage` of a success envelope. A parse error's suggestion lists what the
+failing command accepts, inline: its flags (``Flags for `greeter hello`: --style.``)
+or a group's subcommands, then its usage line, so the retry needs no lookup.
+Past 12 entries it names `agent-info --command "<path>"` instead. Global
+`--json` works before or after a command. Tokens after
 `--` are positional data; do not scan them as flags. Unknown flags, invalid enum
 values, and missing required arguments return exit 3.
 

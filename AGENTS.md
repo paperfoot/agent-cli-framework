@@ -35,22 +35,26 @@ prompt tricks, a server, or a protocol layer to the core.
    the `--` delimiter. Help/version print plain text even when piped (one
    escaped JSON string costs tokens and loses the columns); `--json` wraps them
    in a success envelope. Exit 0. Parse errors go through the framework and
-   exit 3, with a suggestion naming `agent-info --command <path>` for the
-   command that failed. In Rust, use
+   exit 3; the suggestion lists the failing command's flags (or a group's
+   subcommands) and usage inline, or names `agent-info --command <path>` past
+   12 entries. In Rust, use
    `Cli::try_parse()`; never let a parser choose an incompatible error exit code.
 3. **Failures go to stderr.** Return one error envelope, a nonzero code, and no
    success envelope. Serialize before writing. Diagnostic reports on failure
    belong in `error.details`. No raw logs in JSON mode.
 4. **Exit codes are fixed.** `0` success; `1` runtime/transient; `2` config/auth;
-   `3` invalid input/conflict; `4` rate limited. Exit 1 is not permission to replay
-   a write. Recovery depends on the operation and whether its outcome is known.
+   `3` invalid input/conflict; `4` rate limited. Domain codes from `5` are allowed
+   only when documented in the manifest's `exit_codes`. Exit 1 is not permission
+   to replay a write. Recovery depends on the operation and whether its outcome
+   is known; say so with optional `error.retryable` and `error.retry_after_secs`.
 5. **Discovery matches execution.** `agent-info` (alias `info`) emits the raw
-   canonical manifest. `commands` is an object; every entry has `description`,
-   `args`, `options`. Aliases are arrays; global flags live in `global_flags`;
-   config metadata lives in `config`. Generate syntax from the command parser.
+   canonical manifest. `commands` maps each canonical path to one signature line
+   generated from the command parser (`"hello": "<name> --style=: Greet someone"`).
+   Global flags live in `global_flags`; config metadata lives in `config`.
    Test defaults, enums, aliases, examples, and command coverage in both directions.
 6. **Discovery is scoped and local.** `agent-info --command "resource action"`
-   returns the same manifest with only that command; a group selects descendants.
+   returns `name`, `version`, and that command as a full object (`description`,
+   `args`, `options`, defaults, values, aliases); a group selects descendants.
    Unknown paths fail with exit 3. Help, discovery, `config path`, and pure commands
    work offline with absent or malformed config. Do not run doctor automatically.
 7. **No implicit interaction.** No prompts, pagers, stdin reads, or automatic

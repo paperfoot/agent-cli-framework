@@ -64,7 +64,14 @@ Measured against what an agent actually sees (piped stdout):
 | Piped `--help`/`--version` wrapped in an envelope | Plain text when piped; envelope only with `--json` | Help is the agent's entry point; one escaped string added 7% bytes and 41 `\n` escapes to the example's help and lost its columns |
 | Parse errors suggested root `--help` | Inside a known command, the suggestion names `agent-info --command "<path>"`; clap's `error:` prefix and `try '--help'` footer are dropped | Root help does not list a subcommand's flags, so the old hint cost an extra lookup |
 | `--limit` only | `--limit` with short `-n`; existing `--count`/`-c` kept as aliases | Agents guess `-n`; a rejected guess costs a full retry |
+| `agent-info` listed a full object per command | One parser-generated line per command; `--command PATH` returns the object | 32.6 KB → 7.0 KB on xmaster (101 commands); greeter 3,497 → 1,379 bytes |
+| `--command` repeated every top-level field | `name`, `version`, and the selected `commands` only | Saved ~3.5 KB per scoped call on xmaster; greeter `hello` 1,333 → 478 bytes |
+| Parse errors pointed at `agent-info --command` | The suggestion lists the command's flags (or subcommands) and usage inline; the lookup only past 12 | The retry needs zero extra calls |
+| Schema rejected `retryable` in `error` | Optional `error.retryable` (bool) and `error.retry_after_secs` (int ≥ 0) | One boolean tells an agent whether to retry |
+| Exit codes 0–4 only | 0–4 unchanged; domain codes ≥ 5 when documented in `exit_codes` | xmaster's 5 = blocked by X, don't retry unchanged |
 
-Conformance reports an enveloped piped `--help` as a note, not a failure, so
-existing tools can migrate when convenient.
+Conformance reports an enveloped piped `--help`, object-per-command manifests,
+and scoped output that repeats manifest fields as notes, not failures, so
+existing tools can migrate when convenient. The schema accepts a line or an
+object per command, and both scoped shapes.
 

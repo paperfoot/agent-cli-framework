@@ -37,8 +37,8 @@ When piped, the last command returns:
 ```
 
 The same command in a terminal prints a readable greeting. `--json` makes the
-machine format explicit. `agent-info` without a filter still returns the full
-manifest, and `agent-info --command "config show"` handles nested commands.
+machine format explicit. `agent-info` without a filter lists every command on
+one generated line, and `agent-info --command "config show"` handles nested commands.
 Already know the command and its contract? Use it directly.
 
 ## What makes an agent fast
@@ -62,12 +62,12 @@ These choices apply across model families. Model and harness changes belong in
 
 Every CLI has:
 
-- **`agent-info` / `info`** — raw JSON describing real commands, arguments, defaults,
-  examples, and effects; `--command` narrows discovery without changing its shape.
+- **`agent-info` / `info`** — raw JSON: one line per real command, generated from the
+  parser; `--command` returns one command's arguments, defaults, examples, and effects.
 - **Structured output** — compact JSON when piped; readable output in a terminal;
   failures on stderr; `--quiet` suppresses human informational output only.
 - **Semantic exit codes** — `0` success, `1` runtime/transient failure, `2` setup,
-  `3` input, `4` rate limit. Help and version exit `0`.
+  `3` input, `4` rate limit; documented domain codes from `5`. Help and version exit `0`.
 - **`config show` / `config path`** — lazy configuration loading and masked secrets.
 - **`skill install` / `skill status`** — a short embedded signpost to the binary.
 
