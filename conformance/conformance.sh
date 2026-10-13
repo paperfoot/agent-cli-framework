@@ -73,11 +73,21 @@ echo "== help and version =="
 "$BIN" --help >/dev/null 2>&1 && pass "--help exits 0" || fail "--help exits 0"
 "$BIN" --version >/dev/null 2>&1 && pass "--version exits 0" || fail "--version exits 0"
 
+# Help is read, not parsed: plain text when piped; --json wraps it.
 HELP_OUT="$("$BIN" --help 2>/dev/null)"
-check_json "piped --help is wrapped in a success envelope" "$HELP_OUT" \
-  '(.status=="success") and (.version=="1")'
-check_json "--help teaches usage (Tips + Examples sections)" "$HELP_OUT" \
-  '.data.usage | test("Tips:") and test("Examples:")'
+if printf '%s' "$HELP_OUT" | jq -e . >/dev/null 2>&1; then
+  note "piped --help is JSON; plain text reads better and costs fewer tokens (envelope only with --json)"
+  HELP_TEXT="$(printf '%s' "$HELP_OUT" | jq -r '.data.usage // empty')"
+else
+  pass "piped --help is plain text"
+  HELP_TEXT="$HELP_OUT"
+fi
+case "$HELP_TEXT" in
+  *Tips:*Examples:*|*Examples:*Tips:*) pass "--help teaches usage (Tips + Examples sections)" ;;
+  *) fail "--help teaches usage (Tips + Examples sections)" ;;
+esac
+check_json "--json --help is wrapped in a success envelope" "$("$BIN" --json --help 2>/dev/null)" \
+  '(.status=="success") and (.version=="1") and (.data.usage | type=="string")'
 
 echo "== command routability =="
 # Every command key in the manifest (possibly multi-word, e.g. "config show")

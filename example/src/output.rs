@@ -105,7 +105,20 @@ pub fn print_help_json(err: clap::Error) -> Result<(), AppError> {
 }
 
 pub fn print_clap_error(format: Format, err: &clap::Error) {
-    print_error(format, &AppError::InvalidInput(err.to_string()));
+    // Drop clap's "error: " prefix and its "try '--help'" footer: the
+    // envelope already says it is an error and carries a better suggestion.
+    let rendered = err.to_string();
+    let message = rendered
+        .trim_end()
+        .trim_end_matches("For more information, try '--help'.")
+        .trim_end()
+        .trim_start_matches("error: ")
+        .to_string();
+    let error = match crate::cli::command_path(std::env::args().skip(1)) {
+        Some(command) => AppError::InvalidArguments { message, command },
+        None => AppError::InvalidInput(message),
+    };
+    print_error(format, &error);
 }
 
 #[cfg(test)]

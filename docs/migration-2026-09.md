@@ -54,3 +54,17 @@ not a demand to remove working implementations.
 Search, field selection, dry runs, idempotency, batches, and resumable jobs are
 optional command-design patterns, not features automatically installed by this
 revision. Add them when real tasks justify the complexity.
+
+## October 2026 revision
+
+Measured against what an agent actually sees (piped stdout):
+
+| Previous | Current | Why |
+| --- | --- | --- |
+| Piped `--help`/`--version` wrapped in an envelope | Plain text when piped; envelope only with `--json` | Help is the agent's entry point; one escaped string added 7% bytes and 41 `\n` escapes to the example's help and lost its columns |
+| Parse errors suggested root `--help` | Inside a known command, the suggestion names `agent-info --command "<path>"`; clap's `error:` prefix and `try '--help'` footer are dropped | Root help does not list a subcommand's flags, so the old hint cost an extra lookup |
+| `--limit` only | `--limit` with short `-n`; existing `--count`/`-c` kept as aliases | Agents guess `-n`; a rejected guess costs a full retry |
+
+Conformance reports an enveloped piped `--help` as a note, not a failure, so
+existing tools can migrate when convenient.
+

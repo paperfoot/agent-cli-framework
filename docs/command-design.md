@@ -26,7 +26,7 @@ For a collection command, implement these where they fit the provider:
 
 | Convention | Behavior |
 | --- | --- |
-| `--limit N` | Positive bounded count; document the default and maximum |
+| `--limit N` | Positive bounded count; short `-n`; document the default and maximum. Keep an existing `--count`/`-c` as an alias |
 | `--cursor TOKEN` | Opaque continuation token; bind it to the same query and account |
 | `--fields id,name,status` | Select supported fields; reject unknown fields before I/O |
 | Query/filter arguments | Filter at the provider or locally before returning results |

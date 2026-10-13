@@ -110,8 +110,11 @@ report in `error.details` on stderr and exit 2. Missing optional config is a war
 
 ## Help, configuration, and dependencies
 
-Root and command `--help` and root `--version` exit 0. In machine mode, their text
-is in `data.usage`. Global `--json` works before or after a command. Tokens after
+Root and command `--help` and root `--version` exit 0 and print plain text, even
+when piped: agents read help rather than parse it. With `--json` their text is in
+`data.usage` of a success envelope. A parse error inside a known command suggests
+`agent-info --command "<path>"` for that command, so the retry needs one scoped
+lookup instead of the root help. Global `--json` works before or after a command. Tokens after
 `--` are positional data; do not scan them as flags. Unknown flags, invalid enum
 values, and missing required arguments return exit 3.
 

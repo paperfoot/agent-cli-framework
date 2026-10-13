@@ -88,40 +88,37 @@ fn error_code_matches_variant() {
 // ── Help/version wrapping ──────────────────────────────────────────────────
 
 #[test]
-fn help_wrapped_in_envelope_when_piped() {
-    let out = greeter().arg("--help").output().unwrap();
-    assert!(out.status.success());
-
-    // When piped, --help should be wrapped in a success envelope.
-    let json: serde_json::Value =
-        serde_json::from_slice(&out.stdout).expect("piped --help should be JSON");
-
-    assert_eq!(json["status"], "success");
-    assert!(json["data"]["usage"].is_string());
+fn piped_help_and_version_are_plain_text() {
+    // Agents read help; escaping it into one JSON string costs tokens and
+    // loses the column layout. Plain text even when piped.
+    for flag in ["--help", "--version"] {
+        let out = greeter().arg(flag).output().unwrap();
+        assert!(out.status.success());
+        assert!(
+            serde_json::from_slice::<serde_json::Value>(&out.stdout).is_err(),
+            "piped {flag} should be plain text"
+        );
+    }
 }
 
 #[test]
-fn version_wrapped_in_envelope_when_piped() {
-    let out = greeter().arg("--version").output().unwrap();
-    assert!(out.status.success());
-
-    let json: serde_json::Value =
-        serde_json::from_slice(&out.stdout).expect("piped --version should be JSON");
-
-    assert_eq!(json["status"], "success");
+fn help_and_version_wrapped_with_json_flag() {
+    for flag in ["--help", "--version"] {
+        let out = greeter().args(["--json", flag]).output().unwrap();
+        assert!(out.status.success());
+        let json: serde_json::Value = serde_json::from_slice(&out.stdout)
+            .unwrap_or_else(|_| panic!("--json {flag} should be JSON"));
+        assert_eq!(json["status"], "success");
+    }
 }
-
-// ── Rich help ──────────────────────────────────────────────────────────────
 
 #[test]
 fn long_help_includes_tips_and_examples() {
-    // Pattern 6: --help carries a Tips and an Examples section so agents can
-    // bootstrap usage without external docs. Check the wrapped JSON form.
+    // --help carries a Tips and an Examples section so agents can bootstrap
+    // usage without external docs.
     let out = greeter().arg("--help").output().unwrap();
     assert!(out.status.success());
-
-    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    let usage = json["data"]["usage"].as_str().unwrap();
+    let usage = String::from_utf8(out.stdout).unwrap();
     assert!(
         usage.contains("Tips:"),
         "--help must include a Tips section"
@@ -168,6 +165,6 @@ fn parse_error_wrapped_in_envelope() {
         json["error"]["suggestion"]
             .as_str()
             .unwrap()
-            .contains("--help")
+            .contains("agent-info --command \"hello\"")
     );
 }

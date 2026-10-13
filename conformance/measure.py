@@ -80,15 +80,6 @@ def json_object(case: str, stdout: bytes) -> dict[str, Any]:
     return value
 
 
-def success_envelope(case: str, value: dict[str, Any]) -> None:
-    if (
-        value.get("version") != "1"
-        or value.get("status") != "success"
-        or not isinstance(value.get("data"), dict)
-    ):
-        raise MeasurementError(f"{case}: expected a version 1 success envelope")
-
-
 def full_manifest(case: str, value: dict[str, Any]) -> None:
     if (
         not isinstance(value.get("name"), str)
@@ -181,9 +172,12 @@ def invoke(
         raise MeasurementError(
             f"{case}: expected empty stderr, got {len(stderr)} bytes"
         )
-    value = json_object(case, stdout)
-    if validate is not None:
-        validate(case, value)
+    # Help and version are plain text (read, not parsed); measure them as-is.
+    if validate is None:
+        if not stdout.strip():
+            raise MeasurementError(f"{case}: expected text on stdout")
+    else:
+        validate(case, json_object(case, stdout))
     return len(stdout), len(stderr), elapsed_ms, cpu_ms, peak_rss
 
 
@@ -312,8 +306,8 @@ def main() -> int:
             env[name] = temp_dir
         executable = str(binary)
         specs: list[tuple[str, list[str], Validator]] = [
-            ("help", [executable, "--help"], success_envelope),
-            ("version", [executable, "--version"], success_envelope),
+            ("help", [executable, "--help"], None),
+            ("version", [executable, "--version"], None),
             ("agent_info", [executable, "agent-info"], full_manifest),
         ]
         if args.command is not None:

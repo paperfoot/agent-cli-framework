@@ -67,3 +67,30 @@ fn hello_works_with_temp_home() {
         .assert()
         .code(0);
 }
+
+/// A parse error inside a command points at that command's scoped contract,
+/// and the suggested command itself works.
+#[test]
+fn parse_error_suggests_scoped_discovery() {
+    let out = greeter()
+        .args(["config", "show", "--bogus", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(3));
+    let json: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    let suggestion = json["error"]["suggestion"].as_str().unwrap();
+    assert!(
+        suggestion.ends_with("agent-info --command \"config show\""),
+        "{suggestion}"
+    );
+    assert!(
+        !json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("try '--help'")
+    );
+    greeter()
+        .args(["agent-info", "--command", "config show"])
+        .assert()
+        .code(0);
+}

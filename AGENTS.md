@@ -27,12 +27,16 @@ prompt tricks, a server, or a protocol layer to the core.
 
 ## Required contracts
 
-1. **Stdout is data.** Piped/redirected output is one compact JSON document.
+1. **Stdout is data.** Piped/redirected output is one compact JSON document
+   (help and version excepted: they are read, not parsed).
    A terminal gets readable output. Global `--json` forces JSON; global `--quiet`
    suppresses human informational output, never JSON or errors.
 2. **Help and version succeed.** Own the parser's result. Pre-scan `--json` up to
-   the `--` delimiter. Wrap help/version in a success envelope when piped; exit 0.
-   Parse errors go through the framework and exit 3. In Rust, use
+   the `--` delimiter. Help/version print plain text even when piped (one
+   escaped JSON string costs tokens and loses the columns); `--json` wraps them
+   in a success envelope. Exit 0. Parse errors go through the framework and
+   exit 3, with a suggestion naming `agent-info --command <path>` for the
+   command that failed. In Rust, use
    `Cli::try_parse()`; never let a parser choose an incompatible error exit code.
 3. **Failures go to stderr.** Return one error envelope, a nonzero code, and no
    success envelope. Serialize before writing. Diagnostic reports on failure
@@ -138,6 +142,8 @@ Alias CRUD verbs consistently: `list` / `ls`, `create` / `new`, `delete` / `rm`,
 `show` / `get` (`visible_alias` in Clap). Use parser-enforced closed vocabularies
 (`ValueEnum` in Rust). Root `--help` has 3–8 concise Tips and real Examples
 (`after_long_help` in Clap).
+Accept the flag names agents guess: `--limit` with short `-n` for counts, and
+keep an existing spelling (`--count`, `-c`) as an alias rather than breaking it.
 Describe useful tasks, defaults, effects, and the result; avoid redundant prose.
 
 Keep the installed skill a short signpost: when to use the CLI, one useful

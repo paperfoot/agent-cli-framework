@@ -74,7 +74,7 @@ def main():
             return value
 
         full = run(["agent-info"], manifest=True)
-        run(["--help"])
+        run(["--help", "--json"])
         run(["--version", "--json"])
         run(["definitely-not-a-command-xyz", "--json"], code=3)
         scoped = any(

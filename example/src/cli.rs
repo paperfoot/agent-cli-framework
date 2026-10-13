@@ -120,3 +120,23 @@ pub enum ConfigAction {
     /// Print configuration file path
     Path,
 }
+
+/// Canonical path of the deepest subcommand named in `args` ("config show"),
+/// or `None` when no subcommand matched. Flags and their values are skipped;
+/// aliases resolve to canonical names, matching `agent-info --command`.
+pub fn command_path(args: impl IntoIterator<Item = String>) -> Option<String> {
+    use clap::CommandFactory;
+    let root = Cli::command();
+    let mut current = &root;
+    let mut path = Vec::new();
+    for arg in args {
+        if arg == "--" || !current.has_subcommands() {
+            break;
+        }
+        if let Some(sub) = current.find_subcommand(&arg) {
+            path.push(sub.get_name().to_string());
+            current = sub;
+        }
+    }
+    (!path.is_empty()).then(|| path.join(" "))
+}

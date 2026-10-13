@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 /// Error types with semantic exit codes.
 ///
 /// Every error maps to an exit code (1-4), a machine-readable code, and a
@@ -17,6 +19,9 @@ pub enum AppError {
 
     #[error("Invalid input: {0}")]
     InvalidInput(String),
+    /// A parse error inside a known command; `command` is its canonical path.
+    #[error("Invalid input: {message}")]
+    InvalidArguments { message: String, command: String },
 
     #[error("Configuration error: {0}")]
     Config(String),
@@ -44,7 +49,7 @@ impl AppError {
 
     pub fn exit_code(&self) -> i32 {
         match self {
-            Self::InvalidInput(_) | Self::OperationBusy => 3,
+            Self::InvalidInput(_) | Self::InvalidArguments { .. } | Self::OperationBusy => 3,
             Self::Config(_) | Self::Diagnostics(_) => 2,
             Self::RateLimited(_) => 4,
             Self::Transient(_) | Self::Io(_) | Self::Update(_) | Self::Serialization => 1,
@@ -56,7 +61,7 @@ impl AppError {
             Self::Serialization => "serialization_error",
             Self::Diagnostics(_) => "config_error",
             Self::OperationBusy => "operation_busy",
-            Self::InvalidInput(_) => "invalid_input",
+            Self::InvalidInput(_) | Self::InvalidArguments { .. } => "invalid_input",
             Self::Config(_) => "config_error",
             Self::Transient(_) => "transient_error",
             Self::RateLimited(_) => "rate_limited",
@@ -65,34 +70,40 @@ impl AppError {
         }
     }
 
-    pub fn suggestion(&self) -> &str {
+    pub fn suggestion(&self) -> Cow<'static, str> {
         match self {
             Self::Serialization => {
-                "Report this output serialization failure to the tool maintainer"
+                "Report this output serialization failure to the tool maintainer".into()
             }
             Self::Diagnostics(_) => {
-                "Fix the failed checks listed in error.details, then run doctor again"
+                "Fix the failed checks listed in error.details, then run doctor again".into()
             }
-            Self::OperationBusy => "Operation already running. Use --force to override.",
+            Self::OperationBusy => "Operation already running. Use --force to override.".into(),
             Self::InvalidInput(_) => {
-                concat!("Check arguments with: ", env!("CARGO_PKG_NAME"), " --help")
+                concat!("Check arguments with: ", env!("CARGO_PKG_NAME"), " --help").into()
             }
-            Self::Config(_) => concat!(
-                "Check config with: ",
-                env!("CARGO_PKG_NAME"),
-                " config path"
-            ),
+            // Point at the failing command's own contract, not the root help,
+            // so one scoped lookup fixes the retry.
+            Self::InvalidArguments { command, .. } => format!(
+                "See valid arguments with: {} agent-info --command \"{command}\"",
+                env!("CARGO_PKG_NAME")
+            )
+            .into(),
+            Self::Config(_) => {
+                concat!("Check config with: ", env!("CARGO_PKG_NAME"), " config path").into()
+            }
             Self::Transient(_) | Self::Io(_) => {
-                "Inspect the operation result before retrying; a failed response does not prove a write failed"
+                "Inspect the operation result before retrying; a failed response does not prove a write failed".into()
             }
             Self::RateLimited(_) => {
-                "Respect the provider backoff; retry only when the operation is safe to repeat"
+                "Respect the provider backoff; retry only when the operation is safe to repeat".into()
             }
             Self::Update(_) => concat!(
                 "Inspect the installed version and update instructions with: ",
                 env!("CARGO_PKG_NAME"),
                 " update --check"
-            ),
+            )
+            .into(),
         }
     }
 }

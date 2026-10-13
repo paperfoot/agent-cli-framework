@@ -47,17 +47,17 @@ fn main() {
                 e.kind(),
                 clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
             ) {
-                let format = Format::detect(json_flag);
-                match format {
-                    Format::Json => {
-                        if let Err(err) = output::print_help_json(e) {
-                            output::print_error(format, &err);
-                            std::process::exit(err.exit_code());
-                        }
-                        std::process::exit(0);
-                    }
-                    Format::Human => e.exit(), // clap prints coloured help, exits 0
+                // Help is read, not parsed: plain text even when piped, so an
+                // agent sees aligned columns instead of one escaped string.
+                // An explicit --json still gets the envelope.
+                if !json_flag {
+                    e.exit(); // clap prints help (coloured only on a terminal), exits 0
                 }
+                if let Err(err) = output::print_help_json(e) {
+                    output::print_error(Format::Json, &err);
+                    std::process::exit(err.exit_code());
+                }
+                std::process::exit(0);
             }
 
             // Actual parse errors -- always exit 3, never let clap own the exit.
