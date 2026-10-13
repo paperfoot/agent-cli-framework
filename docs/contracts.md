@@ -152,6 +152,8 @@ canonical shape. Consumers should ignore unknown manifest fields.
 
 The envelope schema deliberately rejects undeclared fields. Extend that schema
 and its tests before emitting new envelope fields. Use `error.details` or a
-command's `data` for domain-specific extensions. Do not introduce a second
+command's `data` for domain-specific extensions. An optional top-level
+`metadata` object may carry hints about a success (next steps, truncation,
+cost), so array `data` keeps its shape. Do not introduce a second
 competing envelope, rename `--json` to mean input, or replace JSON with a novel
 encoding without a measured need and an explicit opt-in contract.

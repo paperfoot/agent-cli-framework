@@ -37,6 +37,10 @@
             "object",
             "array"
           ]
+        },
+        "metadata": {
+          "description": "Optional hints about the result that are not the result itself (next steps, truncation, cost). Lets array data carry hints without changing its shape.",
+          "type": "object"
         }
       },
       "additionalProperties": false
