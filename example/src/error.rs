@@ -19,9 +19,9 @@ pub enum AppError {
 
     #[error("Invalid input: {0}")]
     InvalidInput(String),
-    /// A parse error inside a known command; `command` is its canonical path.
+    /// A parse error; `suggestion` says what the command accepts.
     #[error("Invalid input: {message}")]
-    InvalidArguments { message: String, command: String },
+    InvalidArguments { message: String, suggestion: String },
 
     #[error("Configuration error: {0}")]
     Config(String),
@@ -56,6 +56,19 @@ impl AppError {
         }
     }
 
+    /// Whether repeating the same request unchanged can succeed; `None` when
+    /// that depends on an outcome this error cannot know (an uncertain write).
+    pub fn retryable(&self) -> Option<bool> {
+        match self {
+            Self::RateLimited(_) => Some(true),
+            Self::InvalidInput(_)
+            | Self::InvalidArguments { .. }
+            | Self::Config(_)
+            | Self::Diagnostics(_) => Some(false),
+            _ => None,
+        }
+    }
+
     pub fn error_code(&self) -> &str {
         match self {
             Self::Serialization => "serialization_error",
@@ -82,13 +95,7 @@ impl AppError {
             Self::InvalidInput(_) => {
                 concat!("Check arguments with: ", env!("CARGO_PKG_NAME"), " --help").into()
             }
-            // Point at the failing command's own contract, not the root help,
-            // so one scoped lookup fixes the retry.
-            Self::InvalidArguments { command, .. } => format!(
-                "See valid arguments with: {} agent-info --command \"{command}\"",
-                env!("CARGO_PKG_NAME")
-            )
-            .into(),
+            Self::InvalidArguments { suggestion, .. } => suggestion.clone().into(),
             Self::Config(_) => {
                 concat!("Check config with: ", env!("CARGO_PKG_NAME"), " config path").into()
             }

@@ -68,6 +68,9 @@ pub fn print_error(format: Format, err: &AppError) {
     let mut error = serde_json::json!({
         "code": err.error_code(), "message": err.to_string(), "suggestion": err.suggestion(),
     });
+    if let Some(retryable) = err.retryable() {
+        error["retryable"] = retryable.into();
+    }
     if let Some(details) = err.details() {
         error["details"] = details.clone();
     }
@@ -105,20 +108,15 @@ pub fn print_help_json(err: clap::Error) -> Result<(), AppError> {
 }
 
 pub fn print_clap_error(format: Format, err: &clap::Error) {
-    // Drop clap's "error: " prefix and its "try '--help'" footer: the
-    // envelope already says it is an error and carries a better suggestion.
-    let rendered = err.to_string();
-    let message = rendered
-        .trim_end()
-        .trim_end_matches("For more information, try '--help'.")
-        .trim_end()
-        .trim_start_matches("error: ")
-        .to_string();
-    let error = match crate::cli::command_path(std::env::args().skip(1)) {
-        Some(command) => AppError::InvalidArguments { message, command },
-        None => AppError::InvalidInput(message),
-    };
-    print_error(format, &error);
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let (message, suggestion) = crate::cli::explain_parse_error(err, &args);
+    print_error(
+        format,
+        &AppError::InvalidArguments {
+            message,
+            suggestion,
+        },
+    );
 }
 
 #[cfg(test)]

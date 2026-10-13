@@ -68,29 +68,31 @@ fn hello_works_with_temp_home() {
         .code(0);
 }
 
-/// A parse error inside a command points at that command's scoped contract,
-/// and the suggested command itself works.
+/// A parse error names what the failing command accepts, so the retry needs
+/// no extra call.
 #[test]
-fn parse_error_suggests_scoped_discovery() {
-    let out = greeter()
-        .args(["config", "show", "--bogus", "--json"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(3));
-    let json: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
-    let suggestion = json["error"]["suggestion"].as_str().unwrap();
-    assert!(
-        suggestion.ends_with("agent-info --command \"config show\""),
-        "{suggestion}"
-    );
-    assert!(
-        !json["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("try '--help'")
-    );
-    greeter()
-        .args(["agent-info", "--command", "config show"])
-        .assert()
-        .code(0);
+fn parse_error_lists_what_the_command_accepts() {
+    let cases = [
+        (
+            &["config", "show", "--bogus"][..],
+            "`greeter config show` takes no flags. Usage: greeter config show [OPTIONS]",
+        ),
+        (
+            &["config"][..],
+            "Commands for `greeter config`: show, path.",
+        ),
+        (
+            &["helo"][..],
+            "Commands for `greeter`: hello, agent-info, skill, config, doctor, update.",
+        ),
+    ];
+    for (args, expected) in cases {
+        let out = greeter().args(args).arg("--json").output().unwrap();
+        assert_eq!(out.status.code(), Some(3), "{args:?}");
+        let json: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(json["error"]["suggestion"], expected, "{args:?}");
+        let message = json["error"]["message"].as_str().unwrap();
+        assert!(!message.contains("try '--help'"), "{message}");
+        assert!(!message.contains("Usage:"), "{message}");
+    }
 }

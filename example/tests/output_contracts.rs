@@ -161,10 +161,21 @@ fn parse_error_wrapped_in_envelope() {
 
     assert_eq!(json["status"], "error");
     assert_eq!(json["error"]["code"], "invalid_input");
-    assert!(
-        json["error"]["suggestion"]
-            .as_str()
-            .unwrap()
-            .contains("agent-info --command \"hello\"")
+    // The flags and usage are inline: the retry needs no lookup.
+    assert_eq!(
+        json["error"]["suggestion"],
+        "Flags for `greeter hello`: --style. Usage: greeter hello <NAME>"
     );
+    assert_eq!(json["error"]["retryable"], false);
+}
+
+#[test]
+fn rate_limit_error_says_it_is_retryable() {
+    let out = greeter().args(["contract", "4"]).output().unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(json["error"]["retryable"], true);
+    // An uncertain outcome omits the field rather than guessing.
+    let out = greeter().args(["contract", "1"]).output().unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert!(json["error"].get("retryable").is_none());
 }
